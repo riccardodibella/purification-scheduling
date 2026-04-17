@@ -1,6 +1,8 @@
 # pyright: basic
 import numpy as np
 
+rng = np.random.default_rng(0)
+
 # In general, some other parameters may be useful: iteration_number: int, ready_pairs_count: int
 # We ignore those for now, since we don't use them
 def single_pair_greedy_policy(l: list[float]) -> list[tuple[int, int]]:
@@ -28,7 +30,7 @@ def bit_flip_channel_purif_res_fidelity(fid1: float, fid2: float) -> float:
 def sample_bernoulli(ok_prob: float) -> bool:
     assert ok_prob >= 0
     assert ok_prob <= 1
-    return np.random.rand() < ok_prob
+    return rng.random() < ok_prob
 
 def check_feasible_schedule(choices: list[tuple[int, int]]) -> bool:
     # we don't check that all the choices are made within the length of the list
@@ -59,9 +61,27 @@ def purify_sample(fidelities: list[float], choices: list[tuple[int, int]]) -> li
     fids = [f for f in fids if f >= 0] # filter out the -1s
     return fids + new_pairs_fids
 
+# the first list is the list of fidelities below threshold, the second one are the fidelities above
+def filter_pairs_above_threshold(fidelities: list[float], threshold: float) -> tuple[list[float], list[float]]:
+    below: list[float] = []
+    above: list[float] = []
+    for f in fidelities:
+        if f >= threshold:
+            above += [f]
+        else:
+            below += [f]
+    return below, above
+
 if __name__ == "__main__":
-    a_list = [0.67, 0.89, 0.56]
-    choice = single_pair_greedy_policy(a_list)
-    new_list = purify_sample(a_list, choice)
-    print(new_list)
+    iter_list = [rng.uniform(0.5, 0.9) for _ in range(100)]
+    usable_list = []
+    fidelity_threshold = 0.9
+    while len(iter_list) > 1:
+        choice = single_pair_greedy_policy(iter_list)
+        iter_list = purify_sample(iter_list, choice)
+        iter_list, above = filter_pairs_above_threshold(iter_list, fidelity_threshold)
+        usable_list += above
+    
+    print(len(usable_list))
+    
     
