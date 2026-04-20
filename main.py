@@ -5,7 +5,6 @@ from typing import Callable
 import numpy as np
 import matplotlib.pyplot as plt
 
-# rng = np.random.default_rng(0)
 rng = np.random.default_rng(0)
 
 PolicyFunction = Callable[[list[float]], list[tuple[int, int]]]
@@ -29,6 +28,21 @@ def single_pair_random_policy(l: list[float]) -> list[tuple[int, int]]:
         return []
     i, j = rng.choice(len(l), size=2, replace=False)
     return [(int(i), int(j))]
+
+def all_pairs_policy_opposite(l: list[float]) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0], reverse=True)
+    
+    pairs = []
+    for i in range(0, int(len(working_l)/2)):
+        idx1 = working_l[i][1]
+        idx2 = working_l[len(working_l)-1-i][1]
+        pairs += [(idx1, idx2)]
+        
+    return pairs
+
 
 
 def bit_flip_channel_purif_ok_prob(fid1: float, fid2: float) -> float:
@@ -84,9 +98,9 @@ def purify_sample(fidelities: list[float], choices: list[tuple[int, int]]) -> li
     fids = fidelities.copy() # shallow copy (it's fine because we have only floats)
     new_pairs_fids = []
     for c in choices:
-        purif_ok = sample_bernoulli(werner_channel_purif_ok_prob(fids[c[0]], fids[c[1]]))
+        purif_ok = sample_bernoulli(bit_flip_channel_purif_ok_prob(fids[c[0]], fids[c[1]]))
         if purif_ok:
-            new_pairs_fids += [werner_channel_purif_res_fidelity(fids[c[0]], fids[c[1]])]
+            new_pairs_fids += [bit_flip_channel_purif_res_fidelity(fids[c[0]], fids[c[1]])]
         fids[c[0]] = -1
         fids[c[1]] = -1
     
@@ -111,9 +125,9 @@ def run_randomized_simulation(policy: PolicyFunction, iter_list: None | list[flo
     else:
         iter_list = iter_list.copy()
     usable_list = []
-    fidelity_threshold = 0.9
+    fidelity_threshold = 0.95
     while len(iter_list) > 1:
-        choice = single_pair_random_policy(iter_list)
+        choice = policy(iter_list)
         iter_list = purify_sample(iter_list, choice)
         iter_list, above = filter_pairs_above_threshold(iter_list, fidelity_threshold)
         usable_list += above
@@ -139,10 +153,10 @@ def plot_distribution_dict(results):
 
 
 if __name__ == "__main__":
-    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(32)]
-    for policy in [single_pair_random_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest]:
+    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(100)]
+    for policy in [all_pairs_policy_opposite, single_pair_random_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest]:
         results = {}
-        for i in range(100000):
+        for i in range(10_000):
             outcome = run_randomized_simulation(policy, input_fid_list)
             results[outcome] = results.get(outcome, 0) + 1
         print(f"{policy.__name__}: {average_usable_pairs(results)}")
