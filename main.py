@@ -1,15 +1,22 @@
 # pyright: basic
 import numpy as np
+import matplotlib.pyplot as plt
 
-rng = np.random.default_rng(0)
+# rng = np.random.default_rng(0)
+rng = np.random.default_rng()
 
-# In general, some other parameters may be useful: iteration_number: int, ready_pairs_count: int
-# We ignore those for now, since we don't use them
-def single_pair_greedy_policy(l: list[float]) -> list[tuple[int, int]]:
+def single_pair_greedy_policy_highest(l: list[float]) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0], reverse=True) # descending order (higher fidelity first)
+    return [(working_l[0][1],working_l[1][1])]
+
+def single_pair_greedy_policy_lowest(l: list[float]) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0], reverse=False) # descending order (higher fidelity first)
     return [(working_l[0][1],working_l[1][1])]
 
 
@@ -72,16 +79,44 @@ def filter_pairs_above_threshold(fidelities: list[float], threshold: float) -> t
             below += [f]
     return below, above
 
-if __name__ == "__main__":
-    iter_list = [rng.uniform(0.5, 0.9) for _ in range(100)]
+def run_randomized_simulation(iter_list: None | list[float] = None) -> int:
+    if iter_list is None:
+        iter_list = [rng.uniform(0.5, 0.9) for _ in range(100)]
+        # iter_list = [0.7 for _ in range(100)]
     usable_list = []
     fidelity_threshold = 0.9
     while len(iter_list) > 1:
-        choice = single_pair_greedy_policy(iter_list)
+        choice = single_pair_greedy_policy_lowest(iter_list)
         iter_list = purify_sample(iter_list, choice)
         iter_list, above = filter_pairs_above_threshold(iter_list, fidelity_threshold)
         usable_list += above
+    return len(usable_list)
+
+def average_usable_pairs(results: dict[int, int]) -> float: 
+    total_samples = sum(results.values())
+    assert total_samples > 0
+    weighted_sum = sum(outcome * count for outcome, count in results.items())
     
-    print(len(usable_list))
+    return weighted_sum / total_samples
+
+def plot_distribution_dict(results):
+    # Plotting
+    outcomes = sorted(results.keys())
+    counts = [results[o] for o in outcomes]
+    plt.bar(outcomes, counts, color='skyblue', edgecolor='black')
+    plt.xlabel('Number of Usable Pairs')
+    plt.ylabel('Frequency')
+    plt.title('Outcome Distribution of Purification Simulation')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.show()
+
+if __name__ == "__main__":
+    results = {}
+    for i in range(1000):
+        outcome = run_randomized_simulation()
+        results[outcome] = results.get(outcome, 0) + 1
+    print(average_usable_pairs(results))
+    # plot_distribution_dict(results)
+    
     
     
