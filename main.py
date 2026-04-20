@@ -1,23 +1,31 @@
 # pyright: basic
+from dataclasses import dataclass
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 # rng = np.random.default_rng(0)
-rng = np.random.default_rng()
+rng = np.random.default_rng(0)
 
 def single_pair_greedy_policy_highest(l: list[float]) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
-    working_l = sorted(working_l, key=lambda x: x[0], reverse=True) # descending order (higher fidelity first)
+    working_l = sorted(working_l, key=lambda x: x[0], reverse=True)
     return [(working_l[0][1],working_l[1][1])]
 
 def single_pair_greedy_policy_lowest(l: list[float]) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
-    working_l = sorted(working_l, key=lambda x: x[0], reverse=False) # descending order (higher fidelity first)
+    working_l = sorted(working_l, key=lambda x: x[0], reverse=False)
     return [(working_l[0][1],working_l[1][1])]
+
+def single_pair_random_policy(l: list[float]) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    i, j = rng.choice(len(l), size=2, replace=False)
+    return [(int(i), int(j))]
 
 
 def bit_flip_channel_purif_ok_prob(fid1: float, fid2: float) -> float:
@@ -86,7 +94,7 @@ def run_randomized_simulation(iter_list: None | list[float] = None) -> int:
     usable_list = []
     fidelity_threshold = 0.9
     while len(iter_list) > 1:
-        choice = single_pair_greedy_policy_lowest(iter_list)
+        choice = single_pair_random_policy(iter_list)
         iter_list = purify_sample(iter_list, choice)
         iter_list, above = filter_pairs_above_threshold(iter_list, fidelity_threshold)
         usable_list += above
@@ -110,13 +118,13 @@ def plot_distribution_dict(results):
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.show()
 
+
 if __name__ == "__main__":
     results = {}
-    for i in range(1000):
+    for i in range(5000):
         outcome = run_randomized_simulation()
         results[outcome] = results.get(outcome, 0) + 1
     print(average_usable_pairs(results))
-    # plot_distribution_dict(results)
     
     
     
