@@ -1,11 +1,14 @@
 # pyright: basic
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 # rng = np.random.default_rng(0)
 rng = np.random.default_rng(0)
+
+PolicyFunction = Callable[[list[float]], list[tuple[int, int]]]
 
 def single_pair_greedy_policy_highest(l: list[float]) -> list[tuple[int, int]]:
     if(len(l) < 2):
@@ -42,6 +45,20 @@ def bit_flip_channel_purif_res_fidelity(fid1: float, fid2: float) -> float:
     assert fid2 <= 1
     return  fid1 * fid2  / ( fid1 * fid2 + (1 - fid1) * (1 - fid2) )
 
+def werner_channel_purif_ok_prob(fid1: float, fid2: float) -> float:
+    assert fid1 >= 0
+    assert fid1 <= 1
+    assert fid2 >= 0
+    assert fid2 <= 1
+    return fid1 * fid2 + (1/3) * (fid1 + fid2 - 2 * fid1 * fid2) + (5/9) * (1 - fid1) * (1 - fid2)
+
+def werner_channel_purif_res_fidelity(fid1: float, fid2: float) -> float:
+    assert fid1 >= 0
+    assert fid1 <= 1
+    assert fid2 >= 0
+    assert fid2 <= 1
+    return  ( fid1 * fid2 + (1/9) * (1 - fid1) * (1 - fid2) ) / ( fid1 * fid2 + (1/3) * (fid1 + fid2 - 2 * fid1 * fid2) + (5/9) * (1 - fid1) * (1 - fid2) )
+
 def sample_bernoulli(ok_prob: float) -> bool:
     assert ok_prob >= 0
     assert ok_prob <= 1
@@ -67,9 +84,9 @@ def purify_sample(fidelities: list[float], choices: list[tuple[int, int]]) -> li
     fids = fidelities.copy() # shallow copy (it's fine because we have only floats)
     new_pairs_fids = []
     for c in choices:
-        purif_ok = sample_bernoulli(bit_flip_channel_purif_ok_prob(fids[c[0]], fids[c[1]]))
+        purif_ok = sample_bernoulli(werner_channel_purif_ok_prob(fids[c[0]], fids[c[1]]))
         if purif_ok:
-            new_pairs_fids += [bit_flip_channel_purif_res_fidelity(fids[c[0]], fids[c[1]])]
+            new_pairs_fids += [werner_channel_purif_res_fidelity(fids[c[0]], fids[c[1]])]
         fids[c[0]] = -1
         fids[c[1]] = -1
     
@@ -87,10 +104,12 @@ def filter_pairs_above_threshold(fidelities: list[float], threshold: float) -> t
             below += [f]
     return below, above
 
-def run_randomized_simulation(iter_list: None | list[float] = None) -> int:
+def run_randomized_simulation(policy: PolicyFunction, iter_list: None | list[float] = None) -> int:
     if iter_list is None:
         iter_list = [rng.uniform(0.5, 0.9) for _ in range(100)]
         # iter_list = [0.7 for _ in range(100)]
+    else:
+        iter_list = iter_list.copy()
     usable_list = []
     fidelity_threshold = 0.9
     while len(iter_list) > 1:
@@ -120,11 +139,13 @@ def plot_distribution_dict(results):
 
 
 if __name__ == "__main__":
-    results = {}
-    for i in range(5000):
-        outcome = run_randomized_simulation()
-        results[outcome] = results.get(outcome, 0) + 1
-    print(average_usable_pairs(results))
+    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(32)]
+    for policy in [single_pair_random_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest]:
+        results = {}
+        for i in range(100000):
+            outcome = run_randomized_simulation(policy, input_fid_list)
+            results[outcome] = results.get(outcome, 0) + 1
+        print(f"{policy.__name__}: {average_usable_pairs(results)}")
     
     
     
