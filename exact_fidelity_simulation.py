@@ -7,40 +7,32 @@ import numpy as np
 
 rng = np.random.default_rng(0)
 
-PolicyFunction = Callable[[list[float]], list[tuple[int, int]]]
+PolicyFunction = Callable[[list[float], float], list[tuple[int, int]]]
 
-def single_pair_greedy_policy_highest(l: list[float]) -> list[tuple[int, int]]:
+def single_pair_greedy_policy_highest(l: list[float], thresh: float) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0], reverse=True)
     return [(working_l[0][1],working_l[1][1])]
 
-def single_pair_greedy_policy_lowest(l: list[float]) -> list[tuple[int, int]]:
+def single_pair_greedy_policy_lowest(l: list[float], thresh: float) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0], reverse=False)
     return [(working_l[0][1],working_l[1][1])]
 
-def single_pair_random_policy(l: list[float]) -> list[tuple[int, int]]:
-    if(len(l) < 2):
-        return []
-    i, j = rng.choice(len(l), size=2, replace=False)
-    return [(int(i), int(j))]
-
-def all_pairs_policy_opposite(l: list[float]) -> list[tuple[int, int]]:
+def all_pairs_policy_opposite(l: list[float], thresh: float) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0], reverse=True)
-    
     pairs: list[tuple[int, int]] = []
     for i in range(0, int(len(working_l)/2)):
         idx1 = working_l[i][1]
         idx2 = working_l[len(working_l)-1-i][1]
         pairs += [(idx1, idx2)]
-        
     return pairs
 
 
@@ -125,7 +117,7 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[fl
         return [(1, (0, previous_iterations+1, input_fidelities))]
 
     list_after_current_step: list[tuple[float, tuple[int, int, list[float]]]] = []
-    choices = policy(input_fidelities)
+    choices = policy(input_fidelities, fidelity_threshold)
     assert check_feasible_schedule(choices)
     choices_ok_probabilities = [bit_flip_channel_purif_ok_prob(input_fidelities[c[0]], input_fidelities[c[1]]) for c in choices]
     choices_res_fidelities = [bit_flip_channel_purif_res_fidelity(input_fidelities[c[0]], input_fidelities[c[1]]) for c in choices]
@@ -174,7 +166,7 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[fl
     return list_after_recursion
 
 if __name__ == "__main__":
-    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(30)]
+    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(20)]
     for policy in [single_pair_greedy_policy_highest]:
         end_distribution = exact_recursive_simulation(policy, input_fid_list)
         print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)}")
