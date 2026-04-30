@@ -2,3 +2,4 @@
 venv
 *.lprof
 **/typings/
+profile_output*.*
