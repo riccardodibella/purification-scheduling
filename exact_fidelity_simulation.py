@@ -98,6 +98,14 @@ def average_usable_pairs_from_distribution(distribution: list[tuple[float, tuple
         ret += prob * usable
     return ret
 
+def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, int, list[float]]]]) -> float: 
+    ret = 0.0
+    for entry in distribution:
+        prob = entry[0]
+        usable = entry[1][1]
+        ret += prob * usable
+    return ret
+
 def filter_usable_pairs(pairs: list[float], threshold: float) -> tuple[int, list[float]]:
     remaining_pairs = [p for p in pairs if p < threshold]
     usable_counter = len(pairs) - len(remaining_pairs)
@@ -166,10 +174,10 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[fl
     return list_after_recursion
 
 if __name__ == "__main__":
-    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(20)]
-    for policy in [single_pair_greedy_policy_highest]:
+    input_fid_list = [rng.uniform(0.5, 0.9) for _ in range(30)]
+    for policy in [single_pair_greedy_policy_highest, all_pairs_policy_opposite]:
         end_distribution = exact_recursive_simulation(policy, input_fid_list)
-        print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)}")
+        print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
     
     
     
