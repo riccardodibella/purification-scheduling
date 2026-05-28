@@ -1,6 +1,6 @@
 # pyright: strict
 from typing import Callable
-
+from math import log10, ceil
 import numpy as np
 
 rng = np.random.default_rng(0)
@@ -12,9 +12,16 @@ StateDescription = str
 ChoiceDescription = str
 lookup_dict: dict[StateDescription, ChoiceDescription] = {}
 
-def get_state_descr(l: list[tuple[str, float]]) -> StateDescription:
+def sort_fid_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    return sorted(l, key=lambda x: x[1], reverse=True)
 
-    return ""
+def sort_str_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    # Lexicographic ascending order
+    return sorted(l, key=lambda x: x[0], reverse=False)
+
+def get_state_descr(l: list[tuple[str, float]]) -> StateDescription:
+    l = sort_str_named_list(l)
+    return f"[{','.join([t[0] for t in l])}]"
 
 
 def gen_initial_pairs() -> list[float]:
@@ -23,7 +30,10 @@ def gen_initial_pairs() -> list[float]:
 def gen_initial_named_pairs() -> list[tuple[str, float]]:
     fids: list[float] = gen_initial_pairs()
     fids = sorted(fids, reverse=True)
-    to_return = [(f"{i}", fids[i]) for i in range(len(fids))]
+    num_chars = ceil(log10(len(fids)))
+    to_return = [(f"{i}".zfill(num_chars), fids[i]) for i in range(len(fids))]
     return to_return
 
-print(gen_initial_named_pairs())
+initial = gen_initial_named_pairs()
+print(initial)
+print(get_state_descr(initial))
