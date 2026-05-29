@@ -14,8 +14,8 @@ StateDescription = str
 ChoiceDescription = str
 lookup_dict: dict[StateDescription, ChoiceDescription] = {}
 
-def sort_fid_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    return sorted(l, key=lambda x: x[1], reverse=True)
+def sort_fid_named_list(l: list[tuple[str, float]], highestFirst: bool = True) -> list[tuple[str, float]]:
+    return sorted(l, key=lambda x: x[1], reverse=highestFirst)
 
 def sort_str_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
     # Lexicographic ascending order
@@ -65,6 +65,33 @@ def lookup_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, 
     choice_str: ChoiceDescription = lookup_dict[input_state]
     to_return = decode_choice(l, choice_str)
     return to_return
+
+def single_pair_greedy_policy_highest(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
+    return [(working_l[0][1],working_l[1][1])]
+
+
+def single_pair_greedy_policy_lowest(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=False)
+    return [(working_l[0][1],working_l[1][1])]
+
+def all_pairs_policy_opposite(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
+    pairs: list[tuple[int, int]] = []
+    for i in range(0, int(len(working_l)/2)):
+        idx1 = working_l[i][1]
+        idx2 = working_l[len(working_l)-1-i][1]
+        pairs += [(idx1, idx2)]
+    return pairs
 
 def gen_initial_pairs() -> list[float]:
     return [0.85, 0.8, 0.7, 0.6]
@@ -147,10 +174,10 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     usable_counter = len(pairs) - len(remaining_pairs)
     return usable_counter, remaining_pairs
 
-def generate_lookup_dict(input_fidelities: list[tuple[str, float]], threshold: float = 0.98):
+def generate_lookup_dict(input_fidelities: list[tuple[str, float]], threshold: float, model: PurificationModel):
     lookup_dict["0,1,2,3"]=""
 
-def lookup_simulation(input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
+def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
     """
     Return type: [(probability, (# of usable pairs, # of iterations, [(remaining_keys, remaining_fids)]))]
     """
@@ -158,7 +185,7 @@ def lookup_simulation(input_fidelities: list[tuple[str, float]], fidelity_thresh
         return [(1, (0, previous_iterations+1, input_fidelities))]
     
     list_after_current_step: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
-    choices = lookup_policy(input_fidelities, fidelity_threshold)
+    choices = policy(input_fidelities, fidelity_threshold)
     assert check_feasible_schedule(choices)
 
     if len(choices) == 0:
@@ -190,8 +217,8 @@ def lookup_simulation(input_fidelities: list[tuple[str, float]], fidelity_thresh
             choice_outcome = outcome_bitstring[choice_i]
             if choice_outcome is True:
                 new_fidelities += [choices_res_fidelities[choice_i]]
-            outcome_fidelities[c[0]][1] = -1 # type: ignore
-            outcome_fidelities[c[1]][1] = -1 # type: ignore
+            outcome_fidelities[c[0]] = (outcome_fidelities[c[0]][0], -1)
+            outcome_fidelities[c[1]] = (outcome_fidelities[c[1]][0], -1)
         outcome_fidelities = [f for f in outcome_fidelities if f[1] >= 0] # filter out the -1s
         outcome_fidelities += new_fidelities
 
@@ -205,7 +232,7 @@ def lookup_simulation(input_fidelities: list[tuple[str, float]], fidelity_thresh
 
     list_after_recursion: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
     for current_outcome_prob, (current_outcome_usable, current_outcome_iter, current_outcome_remaining_fids) in list_after_current_step:
-        recursion_results = lookup_simulation(current_outcome_remaining_fids, fidelity_threshold, model, current_outcome_iter)
+        recursion_results = exact_recursive_simulation(policy, current_outcome_remaining_fids, fidelity_threshold, model, current_outcome_iter)
         for res_prob, (res_usable, res_iter, res_remaining_fids) in recursion_results:
             new_entry = (
                     current_outcome_prob * res_prob,
@@ -218,9 +245,27 @@ def lookup_simulation(input_fidelities: list[tuple[str, float]], fidelity_thresh
             list_after_recursion.append(new_entry)
     return list_after_recursion
 
+def average_usable_pairs_from_distribution(distribution: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]) -> float: 
+    ret = 0.0
+    for entry in distribution:
+        prob = entry[0]
+        usable = entry[1][0]
+        ret += prob * usable
+    return ret
+
+def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]) -> float: 
+    ret = 0.0
+    for entry in distribution:
+        prob = entry[0]
+        usable = entry[1][1]
+        ret += prob * usable
+    return ret
+
 if __name__ == "__main__":
     threshold = 0.9
+    model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
-    generate_lookup_dict(input_fid_list, threshold)
-    # evaluation
-    lookup_simulation(input_fid_list, threshold, PurificationModel.BIT_FLIP)
+    generate_lookup_dict(input_fid_list, threshold, model)
+    for policy in [lookup_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite]:
+        end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+        print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
