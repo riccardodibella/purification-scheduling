@@ -1,5 +1,6 @@
 # pyright: strict
-from itertools import product
+from dataclasses import dataclass
+from itertools import chain, combinations, product
 from typing import Callable
 from math import log10, ceil
 import numpy as np
@@ -179,8 +180,47 @@ def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, flo
     initial_state = encode_state_description(initial_fids)
     lookup_dict[initial_state] = ""
 
+def str_powerset(keys: list[str])->chain[tuple[str, ...]]: # By default returns a lazy iterable, cast to list if you want all at once
+    "Subsequences of the iterable from shortest to longest."
+    # powerset([1,2,3]) → () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)
+    return chain.from_iterable(combinations(keys, r) for r in range(len(keys)+1))
+
+@dataclass
+class WorkingDictEntry:
+    action: str | None = None
+    definitive: bool = False
+    possible_actions: list[str] | None = None
+
+def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
+    lookup_dict.clear()
+    for k in working_dict.keys():
+        action = working_dict[k].action
+        if action is not None:
+            lookup_dict[k] = action
+
+def generate_possible_states(inputs: list[str]) -> list[str]:
+    # full_state_set: set[str] = set()
+
+    # possible_subsets = list(str_powerset(inputs))
+    # for s in possible_subsets:
+
+    return []
+
+def generate_possible_actions(state_str: str) -> list[str]:
+    return []
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
+
+    input_keys: list[str] = [f[0] for f in initial_fids]
+    # possible_subsets = list(str_powerset(input_keys))
+
+    possible_states = generate_possible_states(input_keys)
+
+    working_dict: dict[str, WorkingDictEntry] = {}
+    for state_string in possible_states:
+        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=generate_possible_actions(state_string))
+    return
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
     """
