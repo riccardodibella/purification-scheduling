@@ -93,8 +93,6 @@ def all_pairs_policy_opposite(l: list[tuple[str, float]], thresh: float) -> list
         pairs += [(idx1, idx2)]
     return pairs
 
-def gen_initial_pairs() -> list[float]:
-    return [0.85, 0.8, 0.7, 0.6]
 
 def gen_initial_named_pairs() -> list[tuple[str, float]]:
     fids: list[float] = gen_initial_pairs()
@@ -174,8 +172,15 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     usable_counter = len(pairs) - len(remaining_pairs)
     return usable_counter, remaining_pairs
 
-def generate_lookup_dict(input_fidelities: list[tuple[str, float]], threshold: float, model: PurificationModel):
-    lookup_dict["0,1,2,3"]=""
+def gen_initial_pairs() -> list[float]:
+    return [0.85, 0.8, 0.7, 0.6]
+
+def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
+    initial_state = encode_state_description(initial_fids)
+    lookup_dict[initial_state] = ""
+
+def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
+    generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
     """
@@ -262,7 +267,7 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
     return ret
 
 if __name__ == "__main__":
-    threshold = 0.9
+    threshold = 0.98
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
     generate_lookup_dict(input_fid_list, threshold, model)
