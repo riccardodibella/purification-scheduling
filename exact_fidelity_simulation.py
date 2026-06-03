@@ -23,7 +23,7 @@ def sort_str_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
     # Lexicographic ascending order
     return sorted(l, key=lambda x: x[0], reverse=False)
 
-def encode_state_description_from_sorted_list_str(l: list[str]) -> str:
+def encode_state_description_from_sorted_list_str(l: list[str]) -> StateDescription:
     return ','.join(l)
 
 def encode_state_description(l: list[tuple[str, float]]) -> StateDescription:
@@ -204,7 +204,7 @@ def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
 
 type Tree = str | tuple[Tree, Tree]
 
-def generate_possible_states(inputs: list[str]) -> list[str]:
+def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # full_state_set: set[str] = set()
 
     # possible_subsets = list(str_powerset(inputs))
@@ -252,6 +252,7 @@ def generate_possible_states(inputs: list[str]) -> list[str]:
 
 
     # 2: Construct all the possible lists of pairs without reusing the same input elements
+    # https://claude.ai/share/b1c541f8-d1f5-4026-a939-9334c7488802
     input_uses_groupings: defaultdict[frozenset[str], list[str]] = defaultdict(list) # we use a defaultdict to make the "append" operation easier without checks for key present or absent
     for elem in all_possible_single_pair_strings:
         plus_delimited: str = elem.replace("<", "+").replace(">", "+")
@@ -314,7 +315,18 @@ def generate_possible_states(inputs: list[str]) -> list[str]:
     return to_return
 
 def generate_possible_actions(state_str: str) -> list[str]:
-    return []
+    input_states: list[str] = state_str.split(",")
+    if len(input_states) < 2:
+        return []
+    to_return: list[str] = []
+    all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(input_states)), 2)) # pyright: ignore[reportUnusedVariable]
+    def tuple_int_int_powerset(l: list[tuple[int, int]]) -> chain[tuple[tuple[int, int], ...]]:
+        return chain.from_iterable(combinations(l, r) for r in range(len(l)+1))
+    single_pairs_powerset = tuple_int_int_powerset(all_possible_single_pairs)
+    for elem in single_pairs_powerset:
+        print(elem)
+        pass
+    return to_return
 
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
@@ -324,7 +336,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
     possible_states = generate_possible_states(input_keys)
 
-    working_dict: dict[str, WorkingDictEntry] = {}
+    working_dict: dict[StateDescription, WorkingDictEntry] = {}
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=generate_possible_actions(state_string))
