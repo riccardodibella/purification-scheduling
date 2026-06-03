@@ -23,9 +23,12 @@ def sort_str_named_list(l: list[tuple[str, float]]) -> list[tuple[str, float]]:
     # Lexicographic ascending order
     return sorted(l, key=lambda x: x[0], reverse=False)
 
+def encode_state_description_from_sorted_list_str(l: list[str]) -> str:
+    return ','.join(l)
+
 def encode_state_description(l: list[tuple[str, float]]) -> StateDescription:
     l = sort_str_named_list(l)
-    return ','.join([t[0] for t in l])
+    return encode_state_description_from_sorted_list_str([t[0] for t in l])
 
 def encode_purified_pair(st1: str, st2: str) -> str:
     return f"<{st1}+{st2}>"
@@ -300,9 +303,13 @@ def generate_possible_states(inputs: list[str]) -> list[str]:
         all_valid_combination_lists += working_list
 
     # 3: Sort the elements of each list lexicographically
+    lex_sorted_combination_lists = [sorted([*combination_tuple], reverse=False) for combination_tuple in all_valid_combination_lists]
+    for i in range(len(all_valid_combination_lists)):
+        all_valid_combination_lists[i] = tuple(sorted([*all_valid_combination_lists[i]], reverse=False)) # Lexicographic ascending order
+    
     # 4: Merge each list in a single string and append it
-
-
+    for sorted_combination in lex_sorted_combination_lists:
+        to_return.append(encode_state_description_from_sorted_list_str(sorted_combination))
 
     return to_return
 
@@ -319,6 +326,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
     working_dict: dict[str, WorkingDictEntry] = {}
     for state_string in possible_states:
+        assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=generate_possible_actions(state_string))
     return
 
