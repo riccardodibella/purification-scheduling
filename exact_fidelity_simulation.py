@@ -1,6 +1,6 @@
 # pyright: strict
 from dataclasses import dataclass
-from itertools import chain, combinations, product
+from itertools import chain, combinations, permutations, product
 from typing import Callable
 from math import log10, ceil
 import numpy as np
@@ -198,13 +198,63 @@ def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
         if action is not None:
             lookup_dict[k] = action
 
+type Tree = str | tuple[Tree, Tree]
+
 def generate_possible_states(inputs: list[str]) -> list[str]:
     # full_state_set: set[str] = set()
 
     # possible_subsets = list(str_powerset(inputs))
     # for s in possible_subsets:
 
-    return []
+    to_return: list[str] = []
+
+    # 1: Generate all possible pairs that we could arrive at
+    all_possible_single_pair_strings: set[str] = set() # pyright: ignore[reportUnusedVariable]
+    possible_pair_subsets = list(str_powerset(inputs))
+    for subset in possible_pair_subsets:
+
+        def possible_orderings(input: tuple[str, ...]) -> list[tuple[str, ...]]:
+            # https://claude.ai/share/669ba829-d830-4f13-a299-101e3a7c1a67
+            return list(permutations(input))
+        
+        for ordering in possible_orderings(subset):
+
+            def all_trees(elements: tuple[str, ...]) -> list[Tree]:
+                # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
+                if len(elements) == 1:
+                    return [elements[0]]
+
+                result: list[Tree] = []
+                for i in range(1, len(elements)):
+                    left_trees  = all_trees(elements[:i])
+                    right_trees = all_trees(elements[i:])
+                    for left in left_trees:
+                        for right in right_trees:
+                            result.append((left, right))
+                return result
+                
+            for tree in all_trees(ordering):
+                # if "tree" is just a string, it is a pair by itself: add it to the set
+                if type(tree) is str:
+                    all_possible_single_pair_strings.add(tree)
+                else:
+                    # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
+                    assert type(tree) is tuple
+                    def collapse_tree_to_string(t: Tree) -> str:
+                        l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
+                        r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
+                        return encode_purified_pair(l_side, r_side)
+                    all_possible_single_pair_strings.add(collapse_tree_to_string(tree))
+
+    print(all_possible_single_pair_strings)
+    # 2: Construct all the possible lists of pairs
+    # 3*: Sort the elements of each list lexicographically
+    # 4*: Filter out elements with the same qubit appearing more than 1 time
+    # 5: Merge each list in a single string and append it
+
+
+
+    return to_return
 
 def generate_possible_actions(state_str: str) -> list[str]:
     return []
