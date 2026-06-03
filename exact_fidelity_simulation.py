@@ -1,4 +1,5 @@
 # pyright: strict
+from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain, combinations, permutations, product
 from typing import Callable
@@ -246,11 +247,60 @@ def generate_possible_states(inputs: list[str]) -> list[str]:
                         return encode_purified_pair(l_side, r_side)
                     all_possible_single_pair_strings.add(collapse_tree_to_string(tree))
 
-    print(all_possible_single_pair_strings)
-    # 2: Construct all the possible lists of pairs
-    # 3*: Sort the elements of each list lexicographically
-    # 4*: Filter out elements with the same qubit appearing more than 1 time
-    # 5: Merge each list in a single string and append it
+
+    # 2: Construct all the possible lists of pairs without reusing the same input elements
+    input_uses_groupings: defaultdict[frozenset[str], list[str]] = defaultdict(list) # we use a defaultdict to make the "append" operation easier without checks for key present or absent
+    for elem in all_possible_single_pair_strings:
+        plus_delimited: str = elem.replace("<", "+").replace(">", "+")
+        inputs = plus_delimited.split("+")
+        input_elems_set: set[str] = set()
+        for input_elem in inputs:
+            if input_elem != "":
+                input_elems_set.add(input_elem)
+        frozen_input_elems_set: frozenset[str] = frozenset(input_elems_set) # we use a frozenset as a key because it is just an immutable set
+        input_uses_groupings[frozen_input_elems_set].append(elem)
+    
+    frozenset_keys = list(input_uses_groupings.keys())
+
+    def str_frozenset_powerset(iterable: list[frozenset[str]]) -> chain[tuple[frozenset[str], ...]]:
+        s = list(iterable)
+        return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+
+    all_key_combinations = str_frozenset_powerset(iterable=frozenset_keys)
+    valid_key_combinations: list[tuple[frozenset[str], ...]] = []
+    for key_combination in all_key_combinations:
+        if len(key_combination) == 0:
+            continue
+        input_overlap = False
+        found_keys_set: set[str] = set()
+        for fs in key_combination:
+            for fs_key in fs:
+                if fs_key in found_keys_set:
+                    input_overlap = True
+                    break
+                found_keys_set.add(fs_key)
+            if input_overlap:
+                break
+        if not input_overlap:
+            valid_key_combinations.append(key_combination)
+
+    all_valid_combination_lists: list[tuple[str, ...]] = []
+    for comb in valid_key_combinations:
+        working_list: list[tuple[str, ...]] = []
+        for fs in comb:
+            if len(working_list) == 0:
+                for single_string in input_uses_groupings[fs]:
+                    working_list.append((single_string,))
+            else:
+                new_working_list: list[tuple[str, ...]] = []
+                for a in working_list:
+                    for b in input_uses_groupings[fs]:
+                        new_working_list.append(a + (b,))
+                working_list = new_working_list
+        all_valid_combination_lists += working_list
+
+    # 3: Sort the elements of each list lexicographically
+    # 4: Merge each list in a single string and append it
 
 
 
