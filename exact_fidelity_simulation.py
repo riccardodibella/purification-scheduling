@@ -419,12 +419,23 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
 
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
-    config_count = 1
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
         actions: list[ChoiceDescription] = generate_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
-        config_count *= len(actions)
+    
+    # remove actions for 2-input states that cannot reach the fidelity threshold
+    for state_string in possible_states:
+        inputs: list[str] = state_string.split(",")
+        if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
+            working_dict[state_string].possible_actions = [""]
+
+    config_count = 1
+    for state_string in possible_states:
+        p_a = working_dict[state_string].possible_actions
+        assert p_a is not None
+        config_count *= len(p_a)
+
     print(f"Total configuration count: {config_count}")
     best_config_i: int = -1
     best_config_i_usable: float = -1
