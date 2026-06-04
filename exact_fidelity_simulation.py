@@ -2,6 +2,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import chain, combinations, permutations, product
+import math
 from typing import Callable
 from math import log10, ceil
 import numpy as np
@@ -315,7 +316,6 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     return to_return
 
 def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
-    print(state_str)
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
         return [""]
@@ -348,11 +348,10 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
                 if i < len(new_pairs_list) - 1:
                     choice_string += ","
             to_return.append(choice_string)
-    print(to_return)
     return to_return
 
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
-    generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
+    # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
     input_keys: list[str] = [f[0] for f in initial_fids]
     # possible_subsets = list(str_powerset(input_keys))
@@ -360,9 +359,45 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     possible_states = generate_possible_states(input_keys)
 
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
+    config_count = 1
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
-        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=generate_possible_actions(state_string))
+        actions: list[ChoiceDescription] = generate_possible_actions(state_string)
+        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
+        config_count *= len(actions)
+    print(f"Total configuration count: {config_count}")
+    best_config_i: int = -1
+    best_config_i_usable: float = -1
+    best_config_i_steps: float = math.inf
+    for config_i in range(config_count):
+        residual_counter = config_i
+        for state_string in possible_states:
+            actions_for_this_state = working_dict[state_string].possible_actions
+            assert actions_for_this_state is not None
+            num_actions = len(actions_for_this_state)
+            current_choice_index = residual_counter % num_actions
+            lookup_dict[state_string] = actions_for_this_state[current_choice_index]
+            residual_counter //= num_actions
+            assert residual_counter >= 0
+        
+        end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
+        avg_usable = average_usable_pairs_from_distribution(end_distribution)
+        avg_steps = average_steps_from_distribution(end_distribution)
+        if(avg_usable > best_config_i_usable or (avg_usable == best_config_i_usable and avg_steps < best_config_i_steps)):
+            best_config_i = config_i
+            best_config_i_usable = avg_usable
+            best_config_i_steps = avg_steps
+    
+    residual_counter = best_config_i
+    print(f"Best configuration index: {best_config_i}")
+    for state_string in possible_states:
+        actions_for_this_state = working_dict[state_string].possible_actions
+        assert actions_for_this_state is not None
+        num_actions = len(actions_for_this_state)
+        current_choice_index = residual_counter % num_actions
+        lookup_dict[state_string] = actions_for_this_state[current_choice_index]
+        residual_counter //= num_actions
+        assert residual_counter >= 0
     return
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
