@@ -188,7 +188,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.85, 0.8, 0.7]
+    return [0.88, 0.85, 0.8, 0.7]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     initial_state = encode_state_description(initial_fids)
@@ -359,6 +359,56 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
             to_return.append(choice_string)
     return to_return
 
+
+def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
+    assert key != ""
+    if key[0] != "<":
+        # Base case: search it directly in the array and return its fidelity
+        for key2, fid in initial_fids:
+            if key == key2:
+                return fid
+        # We didn't find the key... This is a problem.
+        assert False
+    
+    # Remove first "<" and last ">"
+    assert len(key) >= 5 # at least <X+X>
+    assert key[0] == "<"
+    key = key[1:]
+    assert key[-1] == ">"
+    key = key[:-1]
+
+    # Split in the middle
+    left_end = 0
+    height = 1 if key[left_end] == "<" else 0
+    while left_end == 0 or height > 0 or key[left_end] != "+":
+        left_end += 1
+        if key[left_end] == "<":
+            height += 1
+        elif key[left_end] == ">":
+            height -= 1
+
+    left_key = key[:left_end]
+    right_key = key[left_end+1:]
+
+    left_fid = get_key_fidelity_recursive(left_key, initial_fids, model)
+    right_fid = get_key_fidelity_recursive(right_key, initial_fids, model)
+
+    return purif_res_fidelity(model, left_fid, right_fid)
+
+
+def is_state_above_threshold(key: str, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
+    return get_key_fidelity_recursive(key, initial_fids, model) > threshold
+
+def state_is_reachable(state_string: StateDescription, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
+    # we return False if some state in the state string has fidelity > threshold
+    inputs: list[str] = state_string.split(",")
+    # print(inputs)
+    for input in inputs:
+        if is_state_above_threshold(input, initial_fids, threshold, model):
+            return False
+    return True
+
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
@@ -366,6 +416,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     # possible_subsets = list(str_powerset(input_keys))
 
     possible_states = generate_possible_states(input_keys)
+    possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
 
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
     config_count = 1
