@@ -178,7 +178,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.85, 0.8, 0.7, 0.6]
+    return [0.85, 0.8, 0.7]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     initial_state = encode_state_description(initial_fids)
@@ -314,18 +314,41 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
 
     return to_return
 
-def generate_possible_actions(state_str: str) -> list[str]:
+def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
+    print(state_str)
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
-        return []
+        return [""]
     to_return: list[str] = []
-    all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(input_states)), 2)) # pyright: ignore[reportUnusedVariable]
+    all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(input_states)), 2))
     def tuple_int_int_powerset(l: list[tuple[int, int]]) -> chain[tuple[tuple[int, int], ...]]:
         return chain.from_iterable(combinations(l, r) for r in range(len(l)+1))
     single_pairs_powerset = tuple_int_int_powerset(all_possible_single_pairs)
-    for elem in single_pairs_powerset:
-        print(elem)
-        pass
+    for pairs_list in single_pairs_powerset:
+        
+        index_count_dict: dict[int, int] = defaultdict(int) # pyright: ignore[reportUnusedVariable]
+        for pair in pairs_list:
+            index_count_dict[pair[0]] += 1
+            index_count_dict[pair[1]] += 1
+
+        overlapping: bool = False
+        for k in index_count_dict.keys():
+            if index_count_dict[k] > 1:
+                overlapping = True
+                break
+        
+        if not overlapping:
+            new_pairs_list: list[tuple[str, str]] = []
+            for pair in pairs_list:
+                new_pairs_list.append((input_states[pair[0]], input_states[pair[1]]))
+            
+            choice_string: ChoiceDescription = ""
+            for i, p in enumerate(new_pairs_list):
+                choice_string += f"{p[0]}:{p[1]}"
+                if i < len(new_pairs_list) - 1:
+                    choice_string += ","
+            to_return.append(choice_string)
+    print(to_return)
     return to_return
 
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
