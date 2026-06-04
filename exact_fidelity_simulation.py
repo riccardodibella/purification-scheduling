@@ -429,6 +429,23 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         inputs: list[str] = state_string.split(",")
         if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
             working_dict[state_string].possible_actions = [""]
+        elif len(inputs) == 3:
+            i = inputs
+            e = encode_purified_pair
+            possible_combinations = [
+                e(i[0], e(i[1], i[2])),
+                e(i[1], e(i[0], i[2])),
+                e(i[2], e(i[0], i[1])),
+                ]
+            keep: bool = False
+            for c in possible_combinations:
+                if is_state_above_threshold(c, initial_fids, threshold, model):
+                    print(f"keep {state_string}")
+                    keep = True
+                    break
+            if not keep:
+                print(f"Not keep! {state_string}")
+                working_dict[state_string].possible_actions = [""]
 
     config_count = 1
     for state_string in possible_states:
@@ -441,6 +458,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     best_config_i_usable: float = -1
     best_config_i_steps: float = math.inf
     for config_i in range(config_count):
+        if config_i % 1_000_000 == 0:
+            print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
         residual_counter = config_i
         for state_string in possible_states:
             actions_for_this_state = working_dict[state_string].possible_actions
@@ -556,7 +575,7 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
     return ret
 
 if __name__ == "__main__":
-    threshold = 0.98
+    threshold = 0.925
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
     generate_lookup_dict(input_fid_list, threshold, model)
