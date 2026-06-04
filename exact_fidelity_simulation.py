@@ -8,6 +8,15 @@ from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
 
+
+import os
+import sys
+
+if os.environ.get("PYTHONHASHSEED") != "0":
+    print("Restarting and setting hash seed")
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
 rng = np.random.default_rng(0)
 
 
