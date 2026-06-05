@@ -19,6 +19,7 @@ if os.environ.get("PYTHONHASHSEED") != "0":
 
 rng = np.random.default_rng(0)
 
+SMART_PRUNING: bool = True
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -223,7 +224,7 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     to_return: list[str] = []
 
     # 1: Generate all possible pairs that we could arrive at
-    all_possible_single_pair_strings: set[str] = set() # pyright: ignore[reportUnusedVariable]
+    all_possible_single_pair_strings: set[str] = set()
     possible_pair_subsets = list(str_powerset(inputs))
     for subset in possible_pair_subsets:
 
@@ -266,15 +267,18 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     input_uses_groupings: defaultdict[frozenset[str], list[str]] = defaultdict(list) # we use a defaultdict to make the "append" operation easier without checks for key present or absent
     for elem in all_possible_single_pair_strings:
         plus_delimited: str = elem.replace("<", "+").replace(">", "+")
-        inputs = plus_delimited.split("+")
+        elem_inputs = plus_delimited.split("+")
         input_elems_set: set[str] = set()
-        for input_elem in inputs:
+        for input_elem in elem_inputs:
             if input_elem != "":
                 input_elems_set.add(input_elem)
         frozen_input_elems_set: frozenset[str] = frozenset(input_elems_set) # we use a frozenset as a key because it is just an immutable set
         input_uses_groupings[frozen_input_elems_set].append(elem)
     
     frozenset_keys = list(input_uses_groupings.keys())
+    
+    # Remove the states that can are missing just one input: for each failed purification, we will lose at least 2 inputs
+    frozenset_keys = [fs for fs in frozenset_keys if len(fs) != len(inputs) - 1]
 
     def str_frozenset_powerset(iterable: list[frozenset[str]]) -> chain[tuple[frozenset[str], ...]]:
         s = list(iterable)
@@ -321,7 +325,6 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # 4: Merge each list in a single string and append it
     for sorted_combination in lex_sorted_combination_lists:
         to_return.append(encode_state_description_from_sorted_list_str(sorted_combination))
-
     return to_return
 
 def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
@@ -416,7 +419,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     # possible_subsets = list(str_powerset(input_keys))
 
     possible_states = generate_possible_states(input_keys)
-    possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
+    if SMART_PRUNING:
+        possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
 
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
     for state_string in possible_states:
@@ -424,28 +428,27 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         actions: list[ChoiceDescription] = generate_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
     
-    # remove actions for 2-input states that cannot reach the fidelity threshold
-    for state_string in possible_states:
-        inputs: list[str] = state_string.split(",")
-        if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
-            working_dict[state_string].possible_actions = [""]
-        elif len(inputs) == 3:
-            i = inputs
-            e = encode_purified_pair
-            possible_combinations = [
-                e(i[0], e(i[1], i[2])),
-                e(i[1], e(i[0], i[2])),
-                e(i[2], e(i[0], i[1])),
-                ]
-            keep: bool = False
-            for c in possible_combinations:
-                if is_state_above_threshold(c, initial_fids, threshold, model):
-                    print(f"keep {state_string}")
-                    keep = True
-                    break
-            if not keep:
-                print(f"Not keep! {state_string}")
+    if SMART_PRUNING:
+        # remove actions for 2-input states that cannot reach the fidelity threshold
+        for state_string in possible_states:
+            inputs: list[str] = state_string.split(",")
+            if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
                 working_dict[state_string].possible_actions = [""]
+            elif len(inputs) == 3:
+                i = inputs
+                e = encode_purified_pair
+                possible_combinations = [
+                    e(i[0], e(i[1], i[2])),
+                    e(i[1], e(i[0], i[2])),
+                    e(i[2], e(i[0], i[1])),
+                    ]
+                keep: bool = False
+                for c in possible_combinations:
+                    if is_state_above_threshold(c, initial_fids, threshold, model):
+                        keep = True
+                        break
+                if not keep:
+                    working_dict[state_string].possible_actions = [""]
 
     config_count = 1
     for state_string in possible_states:
