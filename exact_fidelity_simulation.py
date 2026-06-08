@@ -1,5 +1,5 @@
 # pyright: strict
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from itertools import chain, combinations, permutations, product
 import math
@@ -412,6 +412,111 @@ def state_is_reachable(state_string: StateDescription, initial_fids: list[tuple[
     return True
 
 
+
+
+
+class CustomEx(Exception):
+    """Exception raised by set_nth_policy_tree to signal that the configuration number is beyond 
+    the available number of policies, and that the search can therefore be stopped"""
+
+def set_stop_policy_to_all(working_dict: dict[StateDescription, WorkingDictEntry]):
+    """
+    This acts as a safety net in case we stop early in the lookup_dict construction (because the residual counter reaches 0).
+    In this case, all the keys that were not traversed will have their initial value, which is always the instant termination.
+    """
+    for k in working_dict.keys():
+
+        # Safety check that we are actually setting the first choice (which should be "") as the default
+        available_choices = working_dict[k].possible_actions
+        assert available_choices is not None
+        assert len(available_choices) > 0
+        assert available_choices[0] == ""
+
+        lookup_dict[k] = ""
+
+prev_always_last_choice = False
+def set_nth_policy_tree(entry_point: StateDescription, config_number: int, working_dict: dict[StateDescription, WorkingDictEntry]) -> None:
+    global prev_always_last_choice
+    #print(f"config_number {config_number}")
+    set_stop_policy_to_all(working_dict)
+
+    # This will be used as a FIFO queue (append, popleft)
+    # feel free to change this behavior if it helps improve something, the important thing is that the ordering is kept consistent
+    current_front: deque[str] = deque([entry_point])
+
+    already_added_states: set[str] = set()
+    always_last_choice = True # If this keeps staying to "true", this is the last possible policy (or beyond the last one if we arrive at a point where we have no more options but residual_counter > 0)
+
+    residual_counter: int = config_number
+    while residual_counter > 0: # when we reach 0 we can exit: everything else was already initialized during set_stop_policy_to_all. This is correct also for config_number = 0
+        #print(f"residual_counter {residual_counter} current_front {current_front}")
+
+        if len(current_front) == 0:
+            if always_last_choice:
+                prev_always_last_choice = True
+                #raise CustomEx
+                return
+            else:
+                if(prev_always_last_choice):
+                    print(f"AAAAA {config_number}")
+                prev_always_last_choice = False
+                return
+
+        state_string = current_front.popleft()
+
+        # do the choice of the action based on residual_counter and update it
+        assert state_string in working_dict.keys()
+        actions_for_this_state = working_dict[state_string].possible_actions
+        assert actions_for_this_state is not None
+        num_actions = len(actions_for_this_state)
+        current_choice_index = residual_counter % num_actions
+        if current_choice_index != num_actions - 1:
+            always_last_choice = False
+        chosen_action = actions_for_this_state[current_choice_index]
+        lookup_dict[state_string] = chosen_action
+        residual_counter //= num_actions
+        
+        # append to current_front the new reachable states
+        decoded_choice: list[tuple[str, str]] = decode_choice_description(chosen_action)
+        num_choice_purif_attempts = len(decoded_choice)
+        num_resulting_configurations = 2**num_choice_purif_attempts
+
+        for resulting_config_i in range(num_resulting_configurations):
+            res_state_string: str = state_string # will be modified based on decoded_choice and resulting_config_i
+
+            for bit_number in range(num_choice_purif_attempts):
+                def nth_bit(source_number: int, bit_number: int) -> int:
+                    # https://stackoverflow.com/a/9298889
+                    bit = (source_number >> bit_number) & 1
+                    return bit
+
+                purif_ok = nth_bit(resulting_config_i, bit_number) == 1
+
+                # remove the two input states from the state string (regardless of whether the purification succeeds or not)
+                states_to_discard: list[str] = list(decoded_choice[bit_number])
+                for s in states_to_discard:
+                    assert s in res_state_string
+                    res_state_string = res_state_string.replace(","+s+",", ",").replace(","+s, "").replace(s+",", "").replace(s, "")
+    
+                if purif_ok:
+                    state_string_subparts = res_state_string.split(",")
+                    state_string_subparts.append(encode_purified_pair(decoded_choice[bit_number][0], decoded_choice[bit_number][1]))
+                    state_string_subparts = [s for s in state_string_subparts if s != ""]
+                    res_state_string = encode_state_description_from_sorted_list_str(sorted(state_string_subparts, reverse=False))                    
+
+            if res_state_string != "" and res_state_string not in working_dict.keys():
+                # print(f"Warning: \"{res_state_string}\" not in working_dict.keys()")
+                pass
+
+            if res_state_string != "" and res_state_string not in already_added_states and res_state_string in working_dict.keys():
+                # The check for working_dict.keys() is here to avoid checking states that have been pruned
+                # This could happen when a state has some parts above the threshold, or if the state cannot ever lead to a new usable pair
+                current_front.append(res_state_string)
+                already_added_states.add(res_state_string)
+    prev_always_last_choice = False
+    return
+
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
@@ -450,29 +555,54 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                 if not keep:
                     working_dict[state_string].possible_actions = [""]
 
-    config_count = 1
-    for state_string in possible_states:
-        p_a = working_dict[state_string].possible_actions
-        assert p_a is not None
-        config_count *= len(p_a)
+    # config_count = 1
+    # for state_string in possible_states:
+    #     p_a = working_dict[state_string].possible_actions
+    #     assert p_a is not None
+    #     config_count *= len(p_a)
 
-    print(f"Total configuration count: {config_count}")
-    best_config_i: int = -1
-    best_config_i_usable: float = -1
-    best_config_i_steps: float = math.inf
-    for config_i in range(config_count):
-        if config_i % 1_000_000 == 0:
-            print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
-        residual_counter = config_i
-        for state_string in possible_states:
-            actions_for_this_state = working_dict[state_string].possible_actions
-            assert actions_for_this_state is not None
-            num_actions = len(actions_for_this_state)
-            current_choice_index = residual_counter % num_actions
-            lookup_dict[state_string] = actions_for_this_state[current_choice_index]
-            residual_counter //= num_actions
-            assert residual_counter >= 0
+    # print(f"Total configuration count: {config_count}")
+    # best_config_i: int = -1
+    # best_config_i_usable: float = -1
+    # best_config_i_steps: float = math.inf
+    # for config_i in range(config_count):
+    #     if config_i % 1_000_000 == 0:
+    #         print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
+    #     residual_counter = config_i
+    #     for state_string in possible_states:
+    #         actions_for_this_state = working_dict[state_string].possible_actions
+    #         assert actions_for_this_state is not None
+    #         num_actions = len(actions_for_this_state)
+    #         current_choice_index = residual_counter % num_actions
+    #         lookup_dict[state_string] = actions_for_this_state[current_choice_index]
+    #         residual_counter //= num_actions
+    #         assert residual_counter >= 0
         
+    #     end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
+    #     avg_usable = average_usable_pairs_from_distribution(end_distribution)
+    #     avg_steps = average_steps_from_distribution(end_distribution)
+    #     if(avg_usable > best_config_i_usable or (avg_usable == best_config_i_usable and avg_steps < best_config_i_steps)):
+    #         best_config_i = config_i
+    #         best_config_i_usable = avg_usable
+    #         best_config_i_steps = avg_steps
+
+
+    entry_point = encode_state_description(initial_fids)
+    set_nth_policy_tree(entry_point, 1, working_dict)
+
+    best_config_i: int = -1
+    best_config_i_usable: float = -1.0
+    best_config_i_steps: float = math.inf
+    config_i: int = 0
+    while True:
+        if config_i % 1_000_000 == 0:
+            print(f"{config_i}/??? (??? %)")
+
+        try:
+            set_nth_policy_tree(entry_point, config_i, working_dict)
+        except CustomEx:
+            break
+
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
         avg_steps = average_steps_from_distribution(end_distribution)
@@ -480,9 +610,13 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
             best_config_i = config_i
             best_config_i_usable = avg_usable
             best_config_i_steps = avg_steps
+        
+        config_i += 1
     
-    residual_counter = best_config_i
+    print(f"Total configurations traversed: {config_i+1}")
+    
     print(f"Best configuration index: {best_config_i}")
+    residual_counter = best_config_i
     for state_string in possible_states:
         actions_for_this_state = working_dict[state_string].possible_actions
         assert actions_for_this_state is not None
