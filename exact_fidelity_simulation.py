@@ -190,7 +190,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
 
 def gen_initial_pairs() -> list[float]:
     # return [0.88, 0.85, 0.8, 0.7]
-    return [0.88, 0.85, 0.8, 0.7]
+    return [0.9, 0.9]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     initial_state = encode_state_description(initial_fids)
@@ -439,6 +439,7 @@ def set_lookup_policy_from_array(entry_point: StateDescription, working_dict: di
     set_stop_policy_to_all(working_dict)
 
     current_front: deque[str] = deque([entry_point])
+    print(current_front)
     already_added_states: set[str] = set()
 
     for choice_number in range(len(arr)):
@@ -450,22 +451,32 @@ def set_lookup_policy_from_array(entry_point: StateDescription, working_dict: di
                     all_zeros_from_here = False
                     break
             if all_zeros_from_here:
+                print("all zeros")
                 break # go to the end and return gracefully
             else:
                 raise CustomEx("Last too high (non-zero too late)")
 
 
-        state_string = current_front.popleft()
+        state_string = current_front.pop()
+        print("state_string", state_string)
 
+        print(working_dict)
+        if state_string not in working_dict.keys():
+            print(":(")
+            quit()
         assert state_string in working_dict.keys()
+        
         actions_for_this_state = working_dict[state_string].possible_actions
         assert actions_for_this_state is not None
         num_actions = len(actions_for_this_state)
+        print("num_actions", num_actions)
         current_choice_index = arr[choice_number]
         if current_choice_index >= num_actions:
             raise CustomEx("Last too high (out of bounds action)")
         chosen_action = actions_for_this_state[current_choice_index]
         lookup_dict[state_string] = chosen_action
+
+        print("set action ok")
 
         # append to current_front the new reachable states
         decoded_choice: list[tuple[str, str]] = decode_choice_description(chosen_action)
@@ -504,7 +515,7 @@ def set_lookup_policy_from_array(entry_point: StateDescription, working_dict: di
 
 def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry]) -> None:
     print(target_config_number)
-    M = 10
+    M = 20
     arr = [0] * M
     last_valid = arr.copy()
 
@@ -525,6 +536,9 @@ def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number:
             except CustomEx as e:
                 policy_valid = False
                 print("\t\t", e.args[0])
+            except Exception as e:
+                print("Exception inside loops :(", e)
+                quit()
             if policy_valid:
                 print(f"valid policy tail {tail}")
                 last_valid = arr.copy()
@@ -547,8 +561,9 @@ def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number:
         print("Problemi! Problemi! Problemi!")
         print(e.args)
         quit()
-    except:
-        print("Generic problem")
+    except Exception as e:
+        print("Generic problem", e.args)
+        print(arr)
         quit()
 
     return
@@ -670,7 +685,7 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tu
     Return type: [(probability, (# of usable pairs, # of iterations, [(remaining_keys, remaining_fids)]))]
     """
     if(len(input_fidelities) < 2):
-        return [(1, (0, previous_iterations+1, input_fidelities))]
+        return [(1, (0, previous_iterations, input_fidelities))]
     
     list_after_current_step: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
     choices = policy(input_fidelities, fidelity_threshold)
@@ -678,7 +693,7 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tu
 
     if len(choices) == 0:
         # empty choice list means that the purification path ends here and leftover pairs stay unused
-        return [(1, (0, previous_iterations+1, input_fidelities))]
+        return [(1, (0, previous_iterations, input_fidelities))]
 
     choices_ok_probabilities = [purif_ok_prob(model, input_fidelities[c[0]][1], input_fidelities[c[1]][1]) for c in choices]
     choices_res_fidelities: list[tuple[str, float]] = [(
