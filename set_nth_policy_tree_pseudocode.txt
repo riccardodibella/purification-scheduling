@@ -1,0 +1,32 @@
+set_nth_policy(entry_point, target_config_number):
+    M = 100 // ?
+    arr = [0, 0, ..., 0] // length M
+    last_valid = arr
+
+
+    config_i = 0
+    while config_i < target_config_number:
+        tail = M-1
+        while tail >= 0:
+            arr[tail] += 1
+            for i in range(tail+1, M):
+                arr[i] = 0
+            policy_valid = True
+            try:
+                set_policy_from_array(arr)
+            except InvalidArray: // Or maybe return True/False from set_policy_from_array
+                policy_valid = False
+            if is_policy_array_valid(arr):
+                last_valid = arr
+                break // where tail >= 0
+            else:
+                arr = last_valid
+            tail -= 1
+        if tail < 0:
+            ERROR("insufficient M or something else broke, or we found the end!!!!")
+        config_i += 1
+    
+    set_policy_from_array(arr)
+    
+
+Possiamo aggiungere un "M Safety Check" per controllare che M non sia troppo basso...
