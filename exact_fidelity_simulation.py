@@ -19,7 +19,7 @@ if os.environ.get("PYTHONHASHSEED") != "0":
 
 rng = np.random.default_rng(0)
 
-SMART_PRUNING: bool = True
+SMART_PRUNING: bool = False
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -189,6 +189,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
+    # return [0.88, 0.85, 0.8, 0.7]
     return [0.88, 0.85, 0.8, 0.7]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
@@ -434,48 +435,38 @@ def set_stop_policy_to_all(working_dict: dict[StateDescription, WorkingDictEntry
 
         lookup_dict[k] = ""
 
-prev_always_last_choice = False
-def set_nth_policy_tree(entry_point: StateDescription, config_number: int, working_dict: dict[StateDescription, WorkingDictEntry]) -> None:
-    global prev_always_last_choice
-    #print(f"config_number {config_number}")
+def set_lookup_policy_from_array(entry_point: StateDescription, working_dict: dict[StateDescription, WorkingDictEntry], arr: list[int]) -> None:
     set_stop_policy_to_all(working_dict)
 
-    # This will be used as a FIFO queue (append, popleft)
-    # feel free to change this behavior if it helps improve something, the important thing is that the ordering is kept consistent
     current_front: deque[str] = deque([entry_point])
-
     already_added_states: set[str] = set()
-    always_last_choice = True # If this keeps staying to "true", this is the last possible policy (or beyond the last one if we arrive at a point where we have no more options but residual_counter > 0)
 
-    residual_counter: int = config_number
-    while residual_counter > 0: # when we reach 0 we can exit: everything else was already initialized during set_stop_policy_to_all. This is correct also for config_number = 0
-        #print(f"residual_counter {residual_counter} current_front {current_front}")
+    for choice_number in range(len(arr)):
 
         if len(current_front) == 0:
-            if always_last_choice:
-                prev_always_last_choice = True
-                #raise CustomEx
-                return
+            all_zeros_from_here = True
+            for remaining_choice_number in range(choice_number, len(arr)):
+                if arr[remaining_choice_number] != 0:
+                    all_zeros_from_here = False
+                    break
+            if all_zeros_from_here:
+                break # go to the end and return gracefully
             else:
-                if(prev_always_last_choice):
-                    print(f"AAAAA {config_number}")
-                prev_always_last_choice = False
-                return
+                raise CustomEx("Last too high (non-zero too late)")
+
 
         state_string = current_front.popleft()
 
-        # do the choice of the action based on residual_counter and update it
         assert state_string in working_dict.keys()
         actions_for_this_state = working_dict[state_string].possible_actions
         assert actions_for_this_state is not None
         num_actions = len(actions_for_this_state)
-        current_choice_index = residual_counter % num_actions
-        if current_choice_index != num_actions - 1:
-            always_last_choice = False
+        current_choice_index = arr[choice_number]
+        if current_choice_index >= num_actions:
+            raise CustomEx("Last too high (out of bounds action)")
         chosen_action = actions_for_this_state[current_choice_index]
         lookup_dict[state_string] = chosen_action
-        residual_counter //= num_actions
-        
+
         # append to current_front the new reachable states
         decoded_choice: list[tuple[str, str]] = decode_choice_description(chosen_action)
         num_choice_purif_attempts = len(decoded_choice)
@@ -502,20 +493,65 @@ def set_nth_policy_tree(entry_point: StateDescription, config_number: int, worki
                     state_string_subparts = res_state_string.split(",")
                     state_string_subparts.append(encode_purified_pair(decoded_choice[bit_number][0], decoded_choice[bit_number][1]))
                     state_string_subparts = [s for s in state_string_subparts if s != ""]
-                    res_state_string = encode_state_description_from_sorted_list_str(sorted(state_string_subparts, reverse=False))                    
-
-            if res_state_string != "" and res_state_string not in working_dict.keys():
-                # print(f"Warning: \"{res_state_string}\" not in working_dict.keys()")
-                pass
+                    res_state_string = encode_state_description_from_sorted_list_str(sorted(state_string_subparts, reverse=False))
 
             if res_state_string != "" and res_state_string not in already_added_states and res_state_string in working_dict.keys():
                 # The check for working_dict.keys() is here to avoid checking states that have been pruned
                 # This could happen when a state has some parts above the threshold, or if the state cannot ever lead to a new usable pair
                 current_front.append(res_state_string)
                 already_added_states.add(res_state_string)
-    prev_always_last_choice = False
     return
 
+def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry]) -> None:
+    print(target_config_number)
+    M = 10
+    arr = [0] * M
+    last_valid = arr.copy()
+
+    config_i: int = 0
+    while config_i < target_config_number:
+        print(f"config {config_i}")
+        tail: int = M-1
+        while tail >= 0:
+            print(f"\ttail {tail}")
+            arr[tail] += 1
+            print("\t\t", arr)
+            for i in range(tail+1, M):
+                arr[i] = 0
+            policy_valid = True
+
+            try:
+                set_lookup_policy_from_array(entry_point, working_dict, arr)
+            except CustomEx as e:
+                policy_valid = False
+                print("\t\t", e.args[0])
+            if policy_valid:
+                print(f"valid policy tail {tail}")
+                last_valid = arr.copy()
+                break # where tail >= 0
+            else:
+                arr = last_valid.copy()
+            tail -= 1
+        if tail < 0:
+            # insufficient M or something else broke, or we found the end
+            print(f"Piva Piva l'olio d'oliva target_config_number {target_config_number}")
+            print(arr)
+            raise CustomEx("tail < 0")
+            quit()
+        print(f"found valid policy config_i {config_i} tail {tail}")
+        config_i += 1
+    
+    try:
+        set_lookup_policy_from_array(entry_point, working_dict, arr)
+    except CustomEx as e:
+        print("Problemi! Problemi! Problemi!")
+        print(e.args)
+        quit()
+    except:
+        print("Generic problem")
+        quit()
+
+    return
 
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
@@ -588,20 +624,22 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
 
     entry_point = encode_state_description(initial_fids)
-    set_nth_policy_tree(entry_point, 1, working_dict)
 
     best_config_i: int = -1
     best_config_i_usable: float = -1.0
     best_config_i_steps: float = math.inf
     config_i: int = 0
     while True:
-        if config_i % 1_000_000 == 0:
-            print(f"{config_i}/??? (??? %)")
+        #if config_i % 1_000_000 == 0:
+        print(f"{config_i}/??? (??? %)")
 
         try:
-            set_nth_policy_tree(entry_point, config_i, working_dict)
-        except CustomEx:
+            set_nth_policy_tree_mod(entry_point, config_i, working_dict)
+        except CustomEx as e:
+            print("CustomEx", e)
             break
+        except Exception:
+            print("AAAAAAAAAA Exception generate_lookup_dict")
 
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
