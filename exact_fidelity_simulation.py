@@ -19,7 +19,7 @@ if os.environ.get("PYTHONHASHSEED") != "0":
 
 rng = np.random.default_rng(0)
 
-SMART_PRUNING: bool = False
+SMART_PRUNING: bool = True
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -189,8 +189,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    # return [0.88, 0.85, 0.8, 0.7]
-    return [0.9, 0.9]
+    return [0.88, 0.85, 0.8, 0.7]
+    # return [0.9, 0.9]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     initial_state = encode_state_description(initial_fids)
@@ -568,13 +568,25 @@ def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number:
 
     return
 
+def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
+
+    residual_counter = target_config_number
+    for state_string in possible_states:
+        actions_for_this_state = working_dict[state_string].possible_actions
+        assert actions_for_this_state is not None
+        num_actions = len(actions_for_this_state)
+        current_choice_index = residual_counter % num_actions
+        lookup_dict[state_string] = actions_for_this_state[current_choice_index]
+        residual_counter //= num_actions
+        assert residual_counter >= 0
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
     input_keys: list[str] = [f[0] for f in initial_fids]
     # possible_subsets = list(str_powerset(input_keys))
 
-    possible_states = generate_possible_states(input_keys)
+    possible_states: list[StateDescription] = generate_possible_states(input_keys)
     if SMART_PRUNING:
         possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
 
@@ -606,11 +618,11 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                 if not keep:
                     working_dict[state_string].possible_actions = [""]
 
-    # config_count = 1
-    # for state_string in possible_states:
-    #     p_a = working_dict[state_string].possible_actions
-    #     assert p_a is not None
-    #     config_count *= len(p_a)
+    config_count = 1 # It is (should be...) a valid upper bound even for tree generation
+    for state_string in possible_states:
+        p_a = working_dict[state_string].possible_actions
+        assert p_a is not None
+        config_count *= len(p_a)
 
     # print(f"Total configuration count: {config_count}")
     # best_config_i: int = -1
@@ -638,23 +650,25 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     #         best_config_i_steps = avg_steps
 
 
-    entry_point = encode_state_description(initial_fids)
+    entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
 
     best_config_i: int = -1
     best_config_i_usable: float = -1.0
     best_config_i_steps: float = math.inf
     config_i: int = 0
-    while True:
-        #if config_i % 1_000_000 == 0:
-        print(f"{config_i}/??? (??? %)")
+    while config_i < config_count:
+        if config_i % 1_000_000 == 0:
+            print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
 
-        try:
-            set_nth_policy_tree_mod(entry_point, config_i, working_dict)
-        except CustomEx as e:
-            print("CustomEx", e)
-            break
-        except Exception:
-            print("AAAAAAAAAA Exception generate_lookup_dict")
+        # try:
+        #     set_nth_policy_tree_mod(entry_point, config_i, working_dict)
+        # except CustomEx as e:
+        #     print("CustomEx", e)
+        #     break
+        # except Exception:
+        #     print("AAAAAAAAAA Exception generate_lookup_dict")
+
+        set_nth_policy_blind(config_i, working_dict, possible_states)
 
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
