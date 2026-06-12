@@ -189,7 +189,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.88, 0.85, 0.8, 0.7]
+    # return [0.88, 0.85, 0.8, 0.7]
+    return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
@@ -569,7 +570,6 @@ def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number:
     return
 
 def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
-
     residual_counter = target_config_number
     for state_string in possible_states:
         actions_for_this_state = working_dict[state_string].possible_actions
@@ -580,11 +580,26 @@ def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDesc
         residual_counter //= num_actions
         assert residual_counter >= 0
 
+def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
+    working_possible_states: deque[StateDescription] = deque(sorted(possible_states, key=lambda str: str.count(","), reverse=True))
+
+    residual_counter = target_config_number
+    while len(working_possible_states) > 0:
+        state_string = working_possible_states.popleft()
+        actions_for_this_state = working_dict[state_string].possible_actions
+        assert actions_for_this_state is not None
+        num_actions = len(actions_for_this_state)
+        assert num_actions > 0
+        current_choice_index = residual_counter % num_actions
+        chosen_action: ChoiceDescription = actions_for_this_state[current_choice_index]
+        lookup_dict[state_string] = chosen_action
+        residual_counter //= num_actions
+        assert residual_counter >= 0
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
     input_keys: list[str] = [f[0] for f in initial_fids]
-    # possible_subsets = list(str_powerset(input_keys))
 
     possible_states: list[StateDescription] = generate_possible_states(input_keys)
     if SMART_PRUNING:
@@ -597,7 +612,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
     
     if SMART_PRUNING:
-        # remove actions for 2-input states that cannot reach the fidelity threshold
+        # remove actions for 2- and 3- input states that cannot reach the fidelity threshold
         for state_string in possible_states:
             inputs: list[str] = state_string.split(",")
             if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
@@ -624,32 +639,6 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         assert p_a is not None
         config_count *= len(p_a)
 
-    # print(f"Total configuration count: {config_count}")
-    # best_config_i: int = -1
-    # best_config_i_usable: float = -1
-    # best_config_i_steps: float = math.inf
-    # for config_i in range(config_count):
-    #     if config_i % 1_000_000 == 0:
-    #         print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
-    #     residual_counter = config_i
-    #     for state_string in possible_states:
-    #         actions_for_this_state = working_dict[state_string].possible_actions
-    #         assert actions_for_this_state is not None
-    #         num_actions = len(actions_for_this_state)
-    #         current_choice_index = residual_counter % num_actions
-    #         lookup_dict[state_string] = actions_for_this_state[current_choice_index]
-    #         residual_counter //= num_actions
-    #         assert residual_counter >= 0
-        
-    #     end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
-    #     avg_usable = average_usable_pairs_from_distribution(end_distribution)
-    #     avg_steps = average_steps_from_distribution(end_distribution)
-    #     if(avg_usable > best_config_i_usable or (avg_usable == best_config_i_usable and avg_steps < best_config_i_steps)):
-    #         best_config_i = config_i
-    #         best_config_i_usable = avg_usable
-    #         best_config_i_steps = avg_steps
-
-
     entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
 
     best_config_i: int = -1
@@ -668,7 +657,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         # except Exception:
         #     print("AAAAAAAAAA Exception generate_lookup_dict")
 
-        set_nth_policy_blind(config_i, working_dict, possible_states)
+        set_nth_policy_blind_mod(config_i, working_dict, possible_states)
 
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
@@ -683,15 +672,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     print(f"Total configurations traversed: {config_i+1}")
     
     print(f"Best configuration index: {best_config_i}")
-    residual_counter = best_config_i
-    for state_string in possible_states:
-        actions_for_this_state = working_dict[state_string].possible_actions
-        assert actions_for_this_state is not None
-        num_actions = len(actions_for_this_state)
-        current_choice_index = residual_counter % num_actions
-        lookup_dict[state_string] = actions_for_this_state[current_choice_index]
-        residual_counter //= num_actions
-        assert residual_counter >= 0
+    set_nth_policy_blind_mod(best_config_i, working_dict, possible_states)
     return
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
@@ -767,15 +748,15 @@ def average_usable_pairs_from_distribution(distribution: list[tuple[float, tuple
     for entry in distribution:
         prob = entry[0]
         usable = entry[1][0]
-        ret += prob * usable
+        ret += prob * float(usable)
     return ret
 
 def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]) -> float: 
     ret = 0.0
     for entry in distribution:
         prob = entry[0]
-        usable = entry[1][1]
-        ret += prob * usable
+        steps = entry[1][1]
+        ret += prob * float(steps)
     return ret
 
 if __name__ == "__main__":
