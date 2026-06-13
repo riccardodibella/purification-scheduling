@@ -190,7 +190,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.88, 0.85, 0.8, 0.7, 0.6]
+    return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
+    # return [0.88, 0.85, 0.8, 0.7, 0.6]
     # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
@@ -608,6 +609,7 @@ def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDesc
 
 def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
     working_possible_states: deque[StateDescription] = deque(sorted(possible_states, key=lambda str: str.count(","), reverse=True))
+    set_stop_policy_to_all(working_dict)
 
     residual_counter = target_config_number
     iter_num = 0
@@ -657,6 +659,9 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
                 
 
         iter_num+=1
+
+        if residual_counter == 0:
+            break
 
     if residual_counter > 0 and len(working_possible_states) == 0:
         return False
@@ -713,13 +718,32 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
     entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
 
+
+    """
+    config_count_guess_low = 0
+    config_count_guess_high = config_count
+    while config_count_guess_low < config_count_guess_high:
+        middle = (config_count_guess_low + config_count_guess_high) // 1024
+        valid = set_nth_policy_blind_mod(middle, working_dict, possible_states) and set_nth_policy_blind_mod(middle-1, working_dict, possible_states) and set_nth_policy_blind_mod(middle-2, working_dict, possible_states)  
+        if valid:
+            print(f"{middle} valid")
+            config_count_guess_low = middle + 1
+        else:
+            print(f"{middle} invalid")
+            config_count_guess_high = middle
+    first_invalid = config_count_guess_low
+    print(">>>", first_invalid)
+    """
+
+
     best_config_i: int = -1
     best_config_i_usable: float = -1.0
     best_config_i_steps: float = math.inf
     config_i: int = 0
     while config_i < config_count:
-        if config_i % 1_000_000 == 0:
-            print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
+        if config_i % 1_000 == 0 and config_i > 0:
+            # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
+            print(f"{config_i} (max {config_count})")
 
         # try:
         #     set_nth_policy_tree_mod(entry_point, config_i, working_dict)
