@@ -189,8 +189,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    # return [0.88, 0.85, 0.8, 0.7]
-    return [0.88, 0.85, 0.8]
+    return [0.88, 0.85, 0.8, 0.7]
+    # return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
@@ -215,7 +215,9 @@ def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
         if action is not None:
             lookup_dict[k] = action
 
-type Tree = str | tuple[Tree, Tree]
+from typing import Any
+Tree = Any
+#type Tree = str | tuple[Tree, Tree]
 
 def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # full_state_set: set[str] = set()
@@ -584,6 +586,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
     working_possible_states: deque[StateDescription] = deque(sorted(possible_states, key=lambda str: str.count(","), reverse=True))
 
     residual_counter = target_config_number
+    iter_num = 0
     while len(working_possible_states) > 0:
         state_string = working_possible_states.popleft()
         actions_for_this_state = working_dict[state_string].possible_actions
@@ -595,6 +598,28 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
         lookup_dict[state_string] = chosen_action
         residual_counter //= num_actions
         assert residual_counter >= 0
+
+        if iter_num == 0 and chosen_action != "":
+            components = chosen_action.split(":")
+            
+            working_possible_states = deque(
+                [s for s in working_possible_states if 
+                    ((components[0]+"," not in s) and (","+components[0] not in s))
+                    and
+                    ((components[1]+"," not in s) and (","+components[1] not in s))
+                    and
+                    ((components[0] in s) == (components[1] in s))
+                    and
+                    (not (
+                        (components[0] in s) and (components[1] in s) and (encode_purified_pair(components[0], components[1]) not in s)
+                        ))
+                ])
+
+        iter_num+=1
+
+    if residual_counter > 0 and len(working_possible_states) == 0:
+        return False
+    return True
 
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
@@ -657,7 +682,10 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         # except Exception:
         #     print("AAAAAAAAAA Exception generate_lookup_dict")
 
-        set_nth_policy_blind_mod(config_i, working_dict, possible_states)
+        valid = set_nth_policy_blind_mod(config_i, working_dict, possible_states)
+        if not valid:
+            print(f"Stopped search early at {config_i}")
+            break
 
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
@@ -672,7 +700,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     print(f"Total configurations traversed: {config_i+1}")
     
     print(f"Best configuration index: {best_config_i}")
-    set_nth_policy_blind_mod(best_config_i, working_dict, possible_states)
+    valid = set_nth_policy_blind_mod(best_config_i, working_dict, possible_states)
+    assert valid is True
     return
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
