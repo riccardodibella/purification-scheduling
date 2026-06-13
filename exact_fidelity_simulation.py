@@ -286,14 +286,18 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # Remove the states that can are missing just one input: for each failed purification, we will lose at least 2 inputs
     frozenset_keys = [fs for fs in frozenset_keys if len(fs) != len(inputs) - 1]
 
+    # print("Slow part start")
+    # _start = time.time()
+
+    """
+    valid_key_combinations: list[tuple[frozenset[str], ...]] = []
+
     def str_frozenset_powerset(iterable: list[frozenset[str]]) -> chain[tuple[frozenset[str], ...]]:
         s = list(iterable)
         return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
     all_key_combinations = str_frozenset_powerset(iterable=frozenset_keys)
     valid_key_combinations: list[tuple[frozenset[str], ...]] = []
-    print("Slow part start")
-    _start = time.time()
     for key_combination in all_key_combinations:
         if len(key_combination) == 0:
             continue
@@ -306,8 +310,25 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
             found_keys_set |= fs
         if not input_overlap:
             valid_key_combinations.append(key_combination)
-    _end = time.time()
-    print(f"Slow part end: {_end - _start} s")
+    """
+
+    def recursive_build_valid_key_combinations(all_frozensets: list[frozenset[str]], start_index: int, current: list[frozenset[str]], to_return: list[tuple[frozenset[str], ...]]) -> list[tuple[frozenset[str], ...]]:
+        used_keys:  frozenset[str] = frozenset()
+        for c in current:
+            used_keys = used_keys | c
+        for index in range(start_index, len(all_frozensets)):
+            fs_at_index = all_frozensets[index]
+            if used_keys.isdisjoint(fs_at_index):
+                current_plus_this_fs = current.copy()
+                current_plus_this_fs.append(fs_at_index)
+                to_return.append(tuple(current_plus_this_fs))
+                recursive_build_valid_key_combinations(all_frozensets, index+1, current_plus_this_fs, to_return)
+        return to_return
+
+    valid_key_combinations: list[tuple[frozenset[str], ...]] = recursive_build_valid_key_combinations(all_frozensets = frozenset_keys, start_index = 0, current = [], to_return = [])
+
+    # _end = time.time()
+    # print(f"Slow part end: {_end - _start} s")
 
     all_valid_combination_lists: list[tuple[str, ...]] = []
     for comb in valid_key_combinations:
@@ -619,7 +640,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
                 ])
 
         if SMART_PRUNING:
-            if chosen_action == "":
+            if chosen_action == "": # Note to self: this doesn't seem to be doing anything, idk
                 inputs_for_this_state = set(state_string.split(","))
                 new_working_deque = deque()
                 for state_under_consideration in working_possible_states:
