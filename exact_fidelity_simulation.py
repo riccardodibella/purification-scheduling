@@ -7,6 +7,7 @@ from typing import Callable
 from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
+import time
 
 
 import os
@@ -189,7 +190,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.88, 0.85, 0.8, 0.7]
+    return [0.88, 0.85, 0.8, 0.7, 0.6]
+    # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
 
@@ -290,21 +292,22 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
 
     all_key_combinations = str_frozenset_powerset(iterable=frozenset_keys)
     valid_key_combinations: list[tuple[frozenset[str], ...]] = []
+    print("Slow part start")
+    _start = time.time()
     for key_combination in all_key_combinations:
         if len(key_combination) == 0:
             continue
         input_overlap = False
         found_keys_set: set[str] = set()
         for fs in key_combination:
-            for fs_key in fs:
-                if fs_key in found_keys_set:
-                    input_overlap = True
-                    break
-                found_keys_set.add(fs_key)
-            if input_overlap:
+            if not found_keys_set.isdisjoint(fs):
+                input_overlap = True
                 break
+            found_keys_set |= fs
         if not input_overlap:
             valid_key_combinations.append(key_combination)
+    _end = time.time()
+    print(f"Slow part end: {_end - _start} s")
 
     all_valid_combination_lists: list[tuple[str, ...]] = []
     for comb in valid_key_combinations:
@@ -644,15 +647,20 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     input_keys: list[str] = [f[0] for f in initial_fids]
 
     possible_states: list[StateDescription] = generate_possible_states(input_keys)
+    print("generate_possible_states ok")
     if SMART_PRUNING:
         possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
+        print("states pruning ok")
 
+    
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
         actions: list[ChoiceDescription] = generate_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
-    
+
+    print("generate_possible_actions ok")
+
     if SMART_PRUNING:
         # remove actions for 2- and 3- input states that cannot reach the fidelity threshold
         for state_string in possible_states:
@@ -674,6 +682,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                         break
                 if not keep:
                     working_dict[state_string].possible_actions = [""]
+        print("actions pruning ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
     for state_string in possible_states:
