@@ -615,6 +615,23 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
                         ))
                 ])
 
+        if SMART_PRUNING:
+            if chosen_action == "":
+                inputs_for_this_state = set(state_string.split(","))
+                new_working_deque = deque()
+                for state_under_consideration in working_possible_states:
+                    inputs_for_state_under_consideration = set(state_under_consideration.split(","))
+                    proper_subset = True
+                    for i in inputs_for_state_under_consideration:
+                        if i not in inputs_for_this_state:
+                            proper_subset = False
+                            break
+                    if not proper_subset:
+                        new_working_deque.append(state_under_consideration)
+                    else:
+                        pass
+                
+
         iter_num+=1
 
     if residual_counter > 0 and len(working_possible_states) == 0:
