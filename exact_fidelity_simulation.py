@@ -7,7 +7,7 @@ from typing import Callable
 from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
-import time
+import time # pyright: ignore[reportUnusedImport]
 
 
 import os
@@ -75,7 +75,7 @@ def lookup_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, 
     input_state: StateDescription = encode_state_description(l)
     if input_state not in lookup_dict.keys():
         # Unexpected state! (not in dict)
-        print("Piva piva l'olio d'oliva")
+        print("lookup_policy state not found error")
         print(input_state)
         print(lookup_dict.keys())
         assert False
@@ -607,7 +607,7 @@ def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDesc
         residual_counter //= num_actions
         assert residual_counter >= 0
 
-def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
+def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> bool:
     working_possible_states: deque[StateDescription] = deque(sorted(possible_states, key=lambda str: str.count(","), reverse=True))
     set_stop_policy_to_all(working_dict)
 
@@ -644,7 +644,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
         if SMART_PRUNING:
             if chosen_action == "": # Note to self: this doesn't seem to be doing anything, idk
                 inputs_for_this_state = set(state_string.split(","))
-                new_working_deque = deque()
+                new_working_deque: deque[StateDescription] = deque()
                 for state_under_consideration in working_possible_states:
                     inputs_for_state_under_consideration = set(state_under_consideration.split(","))
                     proper_subset = True
