@@ -12,7 +12,8 @@ import time # pyright: ignore[reportUnusedImport]
 
 import os
 import sys
-sys.set_int_max_str_digits(1000000)
+
+sys.set_int_max_str_digits(1_000_000)
 
 if os.environ.get("PYTHONHASHSEED") != "0":
     print("Restarting and setting hash seed")
@@ -191,10 +192,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    # return [0.88, 0.57, 0.56, 0.55, 0.54, 0.53, 0.52]
-    return [0.88, 0.57, 0.56, 0.55, 0.54, 0.53]
     # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
-    # return [0.88, 0.85, 0.8, 0.7, 0.6]
+    return [0.88, 0.85, 0.8, 0.7, 0.6]
     # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
@@ -645,7 +644,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
                 ])
 
         if SMART_PRUNING:
-            if chosen_action == "": # Note to self: this doesn't seem to be doing anything, idk
+            if chosen_action == "":
                 inputs_for_this_state = set(state_string.split(","))
                 new_working_deque: deque[StateDescription] = deque()
                 for state_under_consideration in working_possible_states:
@@ -659,6 +658,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
                         new_working_deque.append(state_under_consideration)
                     else:
                         pass
+                working_possible_states = new_working_deque
                 
 
         iter_num+=1
@@ -777,7 +777,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     best_config_i_steps: float = math.inf
     config_i: int = 0
     while config_i < config_count:
-        if config_i % 1_000 == 0 and config_i > 0:
+        if config_i % 1_000 == 0:
             # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
             print(f"{config_i} (max {config_count})")
 
