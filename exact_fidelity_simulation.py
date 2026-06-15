@@ -12,6 +12,7 @@ import time # pyright: ignore[reportUnusedImport]
 
 import os
 import sys
+sys.set_int_max_str_digits(1000000)
 
 if os.environ.get("PYTHONHASHSEED") != "0":
     print("Restarting and setting hash seed")
@@ -190,7 +191,9 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
+    # return [0.88, 0.57, 0.56, 0.55, 0.54, 0.53, 0.52]
+    return [0.88, 0.57, 0.56, 0.55, 0.54, 0.53]
+    # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
     # return [0.88, 0.85, 0.8, 0.7, 0.6]
     # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
@@ -688,7 +691,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     print("generate_possible_actions ok")
 
     if SMART_PRUNING:
-        # remove actions for 2- and 3- input states that cannot reach the fidelity threshold
+        # remove actions for 2-, 3- and 4- input states that cannot reach the fidelity threshold
         for state_string in possible_states:
             inputs: list[str] = state_string.split(",")
             if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
@@ -708,6 +711,39 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                         break
                 if not keep:
                     working_dict[state_string].possible_actions = [""]
+            elif len(inputs) == 4:
+                i = inputs
+                e = encode_purified_pair
+                possible_combinations = [
+                    # Balanced (2+2) splits — 3 combinations
+                    e(e(i[0], i[1]), e(i[2], i[3])),
+                    e(e(i[0], i[2]), e(i[1], i[3])),
+                    e(e(i[0], i[3]), e(i[1], i[2])),
+                    # Linear chain, outer = i[0] — 3 combinations
+                    e(i[0], e(i[1], e(i[2], i[3]))),
+                    e(i[0], e(i[2], e(i[1], i[3]))),
+                    e(i[0], e(i[3], e(i[1], i[2]))),
+                    # Linear chain, outer = i[1] — 3 combinations
+                    e(i[1], e(i[0], e(i[2], i[3]))),
+                    e(i[1], e(i[2], e(i[0], i[3]))),
+                    e(i[1], e(i[3], e(i[0], i[2]))),
+                    # Linear chain, outer = i[2] — 3 combinations
+                    e(i[2], e(i[0], e(i[1], i[3]))),
+                    e(i[2], e(i[1], e(i[0], i[3]))),
+                    e(i[2], e(i[3], e(i[0], i[1]))),
+                    # Linear chain, outer = i[3] — 3 combinations
+                    e(i[3], e(i[0], e(i[1], i[2]))),
+                    e(i[3], e(i[1], e(i[0], i[2]))),
+                    e(i[3], e(i[2], e(i[0], i[1]))),
+                ]
+                keep: bool = False
+                for c in possible_combinations:
+                    if is_state_above_threshold(c, initial_fids, threshold, model):
+                        keep = True
+                        break
+                if not keep:
+                    working_dict[state_string].possible_actions = [""]
+            
         print("actions pruning ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
