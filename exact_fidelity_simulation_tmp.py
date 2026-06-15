@@ -9,6 +9,9 @@ import numpy as np
 from enum import Enum, auto
 import time # pyright: ignore[reportUnusedImport]
 
+# pyright: basic
+from line_profiler import profile # PYTHONHASHSEED=0 kernprof -l -v exact_fidelity_simulation.py
+
 
 import os
 import sys
@@ -168,40 +171,6 @@ def purif_res_fidelity(model: PurificationModel, fid1: float, fid2: float) -> fl
         return werner_channel_purif_res_fidelity(fid1, fid2)
     raise NotImplementedError(f"Purification model {model} not supported (purify_ok_prob)")
 
-def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
-    if(len(l) < 2):
-        return []
-    working_l = zip(l, list(range(len(l))))
-    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
-
-    best_delta_f: float = -1
-    best_first_index: int = -1
-    best_second_index: int = -1
-    lllll: list[tuple[tuple[float, float], float]] = []
-    for first_index in range(0, len(working_l)-1):
-        for second_index in range(first_index+1, len(working_l)):
-            f1: float = working_l[first_index][0][1]
-            f2: float = working_l[second_index][0][1]
-            max_f1_f2 = max(f1, f2)
-            res_fid = bit_flip_channel_purif_res_fidelity(f1, f2)
-            delta_f = res_fid - max_f1_f2
-            # print((f1, f2), "->", delta_f)
-            lllll.append(((f1, f2), delta_f))
-            if delta_f > best_delta_f:
-                best_delta_f = delta_f
-                best_first_index = first_index
-                best_second_index = second_index
-    lllll = sorted(lllll, key = lambda x: x[1], reverse=True)
-    print("------------------------")
-    print(l)
-    for aaa in lllll:
-        print(aaa)
-    print("------------------------")
-    assert best_delta_f >= 0
-    assert best_first_index >= 0
-    assert best_second_index >= 0
-    # print((best_first_index, best_second_index), (working_l[best_first_index][1], working_l[best_second_index][1]), (0, len(l)-1))
-    return [(working_l[best_first_index][1], working_l[best_second_index][1])]
 
 def check_feasible_schedule(choices: list[tuple[int, int]]) -> bool:
     # we don't check that all the choices are made within the length of the list
@@ -226,8 +195,10 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
     # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
+    return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
+    return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89, 0.885]
+    return [0.91, 0.90, 0.89, 0.88, 0.87, 0.86, 0.85, 0.84]
     return [0.88, 0.85, 0.8, 0.7, 0.6]
     # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
@@ -259,6 +230,13 @@ from typing import Any
 Tree = Any
 #type Tree = str | tuple[Tree, Tree]
 
+@profile
+def collapse_tree_to_string(t: Tree) -> str:
+    l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
+    r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
+    return encode_purified_pair(l_side, r_side)
+
+@profile
 def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # full_state_set: set[str] = set()
 
@@ -266,6 +244,8 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # for s in possible_subsets:
 
     to_return: list[str] = []
+
+    print("generate_possible_states start")
 
     # 1: Generate all possible pairs that we could arrive at
     all_possible_single_pair_strings: set[str] = set()
@@ -276,7 +256,8 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
             # https://claude.ai/share/669ba829-d830-4f13-a299-101e3a7c1a67
             return list(permutations(input))
         
-        for ordering in possible_orderings(subset):
+        p_orderings = possible_orderings(subset)
+        for ordering in p_orderings:
 
             def all_trees(elements: tuple[str, ...]) -> list[Tree]:
                 # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
@@ -291,20 +272,18 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
                         for right in right_trees:
                             result.append((left, right))
                 return result
-                
-            for tree in all_trees(ordering):
+            
+            a_trees =  all_trees(ordering)
+            for tree in a_trees:
                 # if "tree" is just a string, it is a pair by itself: add it to the set
                 if type(tree) is str:
                     all_possible_single_pair_strings.add(tree)
                 else:
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
-                    def collapse_tree_to_string(t: Tree) -> str:
-                        l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
-                        r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
-                        return encode_purified_pair(l_side, r_side)
                     all_possible_single_pair_strings.add(collapse_tree_to_string(tree))
 
+    print("1 ok")
 
     # 2: Construct all the possible lists of pairs without reusing the same input elements
     # https://claude.ai/share/b1c541f8-d1f5-4026-a939-9334c7488802
@@ -382,17 +361,25 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
                         new_working_list.append(a + (b,))
                 working_list = new_working_list
         all_valid_combination_lists += working_list
+    
+    print("2 ok")
 
     # 3: Sort the elements of each list lexicographically
     lex_sorted_combination_lists = [sorted([*combination_tuple], reverse=False) for combination_tuple in all_valid_combination_lists]
     for i in range(len(all_valid_combination_lists)):
         all_valid_combination_lists[i] = tuple(sorted([*all_valid_combination_lists[i]], reverse=False)) # Lexicographic ascending order
+
+    print("3 ok")
     
     # 4: Merge each list in a single string and append it
     for sorted_combination in lex_sorted_combination_lists:
         to_return.append(encode_state_description_from_sorted_list_str(sorted_combination))
+    
+    print("4 ok")
+
     return to_return
 
+@profile
 def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
@@ -705,6 +692,7 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
         return False
     return True
 
+@profile
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
@@ -934,7 +922,7 @@ if __name__ == "__main__":
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
-    # generate_lookup_dict(input_fid_list, threshold, model)
-    for policy in [single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite, bit_flip_highest_deltaF_single_choice_policy]:
+    generate_lookup_dict(input_fid_list, threshold, model)
+    for policy in [lookup_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite]:
         end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
         print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
