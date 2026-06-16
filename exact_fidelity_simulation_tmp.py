@@ -392,17 +392,14 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
         return chain.from_iterable(combinations(l, r) for r in range(len(l)+1))
     single_pairs_powerset = tuple_int_int_powerset(all_possible_single_pairs)
     for pairs_list in single_pairs_powerset:
-        
-        index_count_dict: dict[int, int] = defaultdict(int) # pyright: ignore[reportUnusedVariable]
-        for pair in pairs_list:
-            index_count_dict[pair[0]] += 1
-            index_count_dict[pair[1]] += 1
-
+        seen_set: set[int] = set()
         overlapping: bool = False
-        for k in index_count_dict.keys():
-            if index_count_dict[k] > 1:
+        for pair in pairs_list:
+            if pair[0] in seen_set or pair[1] in seen_set:
                 overlapping = True
                 break
+            seen_set.add(pair[0])
+            seen_set.add(pair[1])
         
         if not overlapping:
             new_pairs_list: list[tuple[str, str]] = []
