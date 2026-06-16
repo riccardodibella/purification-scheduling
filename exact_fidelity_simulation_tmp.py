@@ -8,6 +8,7 @@ from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
 import time # pyright: ignore[reportUnusedImport]
+from functools import lru_cache
 
 # pyright: basic
 from line_profiler import profile # PYTHONHASHSEED=0 kernprof -l -v exact_fidelity_simulation.py
@@ -47,6 +48,7 @@ def encode_state_description(l: list[tuple[str, float]]) -> StateDescription:
     l = sort_str_named_list(l)
     return encode_state_description_from_sorted_list_str([t[0] for t in l])
 
+@profile
 def encode_purified_pair(st1: str, st2: str) -> str:
     return f"<{st1}+{st2}>"
 
@@ -230,11 +232,28 @@ from typing import Any
 Tree = Any
 #type Tree = str | tuple[Tree, Tree]
 
+@lru_cache(maxsize=None)
 @profile
 def collapse_tree_to_string(t: Tree) -> str:
     l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
     r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
     return encode_purified_pair(l_side, r_side)
+
+@lru_cache(maxsize=None)
+@profile
+def all_trees(elements: tuple[str, ...]) -> list[Tree]:
+    # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
+    if len(elements) == 1:
+        return [elements[0]]
+
+    result: list[Tree] = []
+    for i in range(1, len(elements)):
+        left_trees  = all_trees(elements[:i])
+        right_trees = all_trees(elements[i:])
+        for left in left_trees:
+            for right in right_trees:
+                result.append((left, right))
+    return result
 
 @profile
 def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
@@ -258,20 +277,6 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
         
         p_orderings = possible_orderings(subset)
         for ordering in p_orderings:
-
-            def all_trees(elements: tuple[str, ...]) -> list[Tree]:
-                # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
-                if len(elements) == 1:
-                    return [elements[0]]
-
-                result: list[Tree] = []
-                for i in range(1, len(elements)):
-                    left_trees  = all_trees(elements[:i])
-                    right_trees = all_trees(elements[i:])
-                    for left in left_trees:
-                        for right in right_trees:
-                            result.append((left, right))
-                return result
             
             a_trees =  all_trees(ordering)
             for tree in a_trees:
@@ -414,7 +419,6 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
                     choice_string += ","
             to_return.append(choice_string)
     return to_return
-
 
 def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
     assert key != ""
@@ -919,6 +923,7 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
     return ret
 
 if __name__ == "__main__":
+    prog_start_time = time.time()
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
@@ -926,3 +931,5 @@ if __name__ == "__main__":
     for policy in [lookup_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite]:
         end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
         print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
