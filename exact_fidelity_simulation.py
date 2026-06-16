@@ -8,7 +8,12 @@ from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
 import time # pyright: ignore[reportUnusedImport]
+from functools import lru_cache # pyright: ignore[reportUnusedImport]
 
+"""
+# pyright: basic
+from line_profiler import profile # PYTHONHASHSEED=0 kernprof -l -v exact_fidelity_simulation.py
+"""
 
 import os
 import sys
@@ -177,7 +182,7 @@ def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thr
     best_delta_f: float = -1
     best_first_index: int = -1
     best_second_index: int = -1
-    lllll: list[tuple[tuple[float, float], float]] = []
+    # lllll: list[tuple[tuple[float, float], float]] = []
     for first_index in range(0, len(working_l)-1):
         for second_index in range(first_index+1, len(working_l)):
             f1: float = working_l[first_index][0][1]
@@ -186,17 +191,17 @@ def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thr
             res_fid = bit_flip_channel_purif_res_fidelity(f1, f2)
             delta_f = res_fid - max_f1_f2
             # print((f1, f2), "->", delta_f)
-            lllll.append(((f1, f2), delta_f))
+            # lllll.append(((f1, f2), delta_f))
             if delta_f > best_delta_f:
                 best_delta_f = delta_f
                 best_first_index = first_index
                 best_second_index = second_index
-    lllll = sorted(lllll, key = lambda x: x[1], reverse=True)
-    print("------------------------")
-    print(l)
-    for aaa in lllll:
-        print(aaa)
-    print("------------------------")
+    # lllll = sorted(lllll, key = lambda x: x[1], reverse=True)
+    # print("------------------------")
+    # print(l)
+    # for aaa in lllll:
+    #     print(aaa)
+    # print("------------------------")
     assert best_delta_f >= 0
     assert best_first_index >= 0
     assert best_second_index >= 0
@@ -226,9 +231,10 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
+    return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
+    # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
     # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
-    return [0.88, 0.85, 0.8, 0.7, 0.6]
+    # return [0.88, 0.85, 0.8, 0.7, 0.6]
     # return [0.88, 0.85, 0.8, 0.7]
     # return [0.88, 0.85, 0.8]
     # return [0.9, 0.9]
@@ -255,9 +261,30 @@ def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
         if action is not None:
             lookup_dict[k] = action
 
-from typing import Any
-Tree = Any
-#type Tree = str | tuple[Tree, Tree]
+from typing import Any # pyright: ignore[reportUnusedImport]
+# Tree = Any
+type Tree = str | tuple[Tree, Tree]
+
+@lru_cache(maxsize=None)
+def collapse_tree_to_string(t: Tree) -> str:
+    l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
+    r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
+    return encode_purified_pair(l_side, r_side)
+
+@lru_cache(maxsize=None)
+def all_trees(elements: tuple[str, ...]) -> list[Tree]:
+    # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
+    if len(elements) == 1:
+        return [elements[0]]
+
+    result: list[Tree] = []
+    for i in range(1, len(elements)):
+        left_trees  = all_trees(elements[:i])
+        right_trees = all_trees(elements[i:])
+        for left in left_trees:
+            for right in right_trees:
+                result.append((left, right))
+    return result
 
 def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # full_state_set: set[str] = set()
@@ -266,6 +293,8 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
     # for s in possible_subsets:
 
     to_return: list[str] = []
+
+    print("generate_possible_states start")
 
     # 1: Generate all possible pairs that we could arrive at
     all_possible_single_pair_strings: set[str] = set()
@@ -276,33 +305,17 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
             # https://claude.ai/share/669ba829-d830-4f13-a299-101e3a7c1a67
             return list(permutations(input))
         
-        for ordering in possible_orderings(subset):
-
-            def all_trees(elements: tuple[str, ...]) -> list[Tree]:
-                # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
-                if len(elements) == 1:
-                    return [elements[0]]
-
-                result: list[Tree] = []
-                for i in range(1, len(elements)):
-                    left_trees  = all_trees(elements[:i])
-                    right_trees = all_trees(elements[i:])
-                    for left in left_trees:
-                        for right in right_trees:
-                            result.append((left, right))
-                return result
-                
-            for tree in all_trees(ordering):
+        p_orderings = possible_orderings(subset)
+        for ordering in p_orderings:
+            
+            a_trees =  all_trees(ordering)
+            for tree in a_trees:
                 # if "tree" is just a string, it is a pair by itself: add it to the set
                 if type(tree) is str:
                     all_possible_single_pair_strings.add(tree)
                 else:
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
-                    def collapse_tree_to_string(t: Tree) -> str:
-                        l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
-                        r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
-                        return encode_purified_pair(l_side, r_side)
                     all_possible_single_pair_strings.add(collapse_tree_to_string(tree))
 
 
@@ -403,17 +416,14 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
         return chain.from_iterable(combinations(l, r) for r in range(len(l)+1))
     single_pairs_powerset = tuple_int_int_powerset(all_possible_single_pairs)
     for pairs_list in single_pairs_powerset:
-        
-        index_count_dict: dict[int, int] = defaultdict(int) # pyright: ignore[reportUnusedVariable]
-        for pair in pairs_list:
-            index_count_dict[pair[0]] += 1
-            index_count_dict[pair[1]] += 1
-
+        seen_set: set[int] = set()
         overlapping: bool = False
-        for k in index_count_dict.keys():
-            if index_count_dict[k] > 1:
+        for pair in pairs_list:
+            if pair[0] in seen_set or pair[1] in seen_set:
                 overlapping = True
                 break
+            seen_set.add(pair[0])
+            seen_set.add(pair[1])
         
         if not overlapping:
             new_pairs_list: list[tuple[str, str]] = []
@@ -428,8 +438,8 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
             to_return.append(choice_string)
     return to_return
 
-
-def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
+@lru_cache(maxsize=None)
+def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
     if key[0] != "<":
         # Base case: search it directly in the array and return its fidelity
@@ -459,10 +469,13 @@ def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], 
     left_key = key[:left_end]
     right_key = key[left_end+1:]
 
-    left_fid = get_key_fidelity_recursive(left_key, initial_fids, model)
-    right_fid = get_key_fidelity_recursive(right_key, initial_fids, model)
+    left_fid = get_key_fidelity_recursive_tuple_fids(left_key, initial_fids, model)
+    right_fid = get_key_fidelity_recursive_tuple_fids(right_key, initial_fids, model)
 
     return purif_res_fidelity(model, left_fid, right_fid)
+
+def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
+    return get_key_fidelity_recursive_tuple_fids(key, tuple(initial_fids), model)
 
 
 def is_state_above_threshold(key: str, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
@@ -931,10 +944,13 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
     return ret
 
 if __name__ == "__main__":
+    prog_start_time = time.time()
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
-    # generate_lookup_dict(input_fid_list, threshold, model)
-    for policy in [single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite, bit_flip_highest_deltaF_single_choice_policy]:
+    generate_lookup_dict(input_fid_list, threshold, model)
+    for policy in [lookup_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite, bit_flip_highest_deltaF_single_choice_policy]:
         end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
         print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
