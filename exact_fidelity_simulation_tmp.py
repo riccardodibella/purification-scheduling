@@ -48,7 +48,6 @@ def encode_state_description(l: list[tuple[str, float]]) -> StateDescription:
     l = sort_str_named_list(l)
     return encode_state_description_from_sorted_list_str([t[0] for t in l])
 
-@profile
 def encode_purified_pair(st1: str, st2: str) -> str:
     return f"<{st1}+{st2}>"
 
@@ -233,14 +232,12 @@ Tree = Any
 #type Tree = str | tuple[Tree, Tree]
 
 @lru_cache(maxsize=None)
-@profile
 def collapse_tree_to_string(t: Tree) -> str:
     l_side: str = t[0] if type(t[0]) is str else collapse_tree_to_string(t[0])
     r_side: str = t[1] if type(t[1]) is str else collapse_tree_to_string(t[1])
     return encode_purified_pair(l_side, r_side)
 
 @lru_cache(maxsize=None)
-@profile
 def all_trees(elements: tuple[str, ...]) -> list[Tree]:
     # https://claude.ai/share/3306902d-8459-40ca-b9d6-5f2770203f55
     if len(elements) == 1:
@@ -420,7 +417,8 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
             to_return.append(choice_string)
     return to_return
 
-def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
+@lru_cache(maxsize=None)
+def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
     if key[0] != "<":
         # Base case: search it directly in the array and return its fidelity
@@ -450,10 +448,14 @@ def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], 
     left_key = key[:left_end]
     right_key = key[left_end+1:]
 
-    left_fid = get_key_fidelity_recursive(left_key, initial_fids, model)
-    right_fid = get_key_fidelity_recursive(right_key, initial_fids, model)
+    left_fid = get_key_fidelity_recursive_tuple_fids(left_key, initial_fids, model)
+    right_fid = get_key_fidelity_recursive_tuple_fids(right_key, initial_fids, model)
 
     return purif_res_fidelity(model, left_fid, right_fid)
+
+@profile
+def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], model: PurificationModel) -> float:
+    return get_key_fidelity_recursive_tuple_fids(key, tuple(initial_fids), model)
 
 
 def is_state_above_threshold(key: str, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
