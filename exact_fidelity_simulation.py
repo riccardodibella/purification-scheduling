@@ -231,6 +231,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
+    return [0.924, 0.923, 0.922, 0.922, 0.92, 0.919, 0.918, 0.917]
     return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
     # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
@@ -314,7 +315,9 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
                     resulting_string = collapse_tree_to_string(tree)
-                    if not SMART_PRUNING or not is_state_above_threshold(resulting_string, initial_fids, threshold, model):
+                    if is_state_above_threshold(resulting_string, initial_fids, threshold, model): # This is not a smart pruning, those states are actually unreachable
+                        continue
+                    else:
                         all_possible_single_pair_strings.add(resulting_string)
 
 
@@ -732,17 +735,13 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
-        actions: list[ChoiceDescription] = generate_possible_actions(state_string)
-        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
-
-    print("generate_possible_actions ok")
-
-    if SMART_PRUNING:
-        # remove actions for 2-, 3- and 4- input states that cannot reach the fidelity threshold
-        for state_string in possible_states:
+        only_action_stop = False
+        if SMART_PRUNING:
             inputs: list[str] = state_string.split(",")
+
+            # This if/elif/else chain could be moved to a separate function
             if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
-                working_dict[state_string].possible_actions = [""]
+                only_action_stop = True
             elif len(inputs) == 3:
                 i = inputs
                 e = encode_purified_pair
@@ -757,7 +756,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                         keep = True
                         break
                 if not keep:
-                    working_dict[state_string].possible_actions = [""]
+                    only_action_stop = True
             elif len(inputs) == 4:
                 i = inputs
                 e = encode_purified_pair
@@ -789,9 +788,16 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
                         keep = True
                         break
                 if not keep:
-                    working_dict[state_string].possible_actions = [""]
+                    only_action_stop = True
             
-        print("actions pruning ok")
+
+        if only_action_stop:
+            actions = [""]
+        else:
+            actions: list[ChoiceDescription] = generate_possible_actions(state_string)
+        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
+
+    print("generate_possible_actions ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
     for state_string in possible_states:
