@@ -231,6 +231,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
+    return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
     # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
     # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
@@ -286,15 +287,11 @@ def all_trees(elements: tuple[str, ...]) -> list[Tree]:
                 result.append((left, right))
     return result
 
-def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
-    # full_state_set: set[str] = set()
-
-    # possible_subsets = list(str_powerset(inputs))
-    # for s in possible_subsets:
-
+def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> list[StateDescription]:
     to_return: list[str] = []
 
     print("generate_possible_states start")
+    inputs: list[str] = [f[0] for f in initial_fids]
 
     # 1: Generate all possible pairs that we could arrive at
     all_possible_single_pair_strings: set[str] = set()
@@ -316,7 +313,9 @@ def generate_possible_states(inputs: list[str]) -> list[StateDescription]:
                 else:
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
-                    all_possible_single_pair_strings.add(collapse_tree_to_string(tree))
+                    resulting_string = collapse_tree_to_string(tree)
+                    if not SMART_PRUNING or not is_state_above_threshold(resulting_string, initial_fids, threshold, model):
+                        all_possible_single_pair_strings.add(resulting_string)
 
 
     # 2: Construct all the possible lists of pairs without reusing the same input elements
@@ -721,13 +720,13 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
-    input_keys: list[str] = [f[0] for f in initial_fids]
-
-    possible_states: list[StateDescription] = generate_possible_states(input_keys)
+    possible_states: list[StateDescription] = generate_possible_states(initial_fids, threshold, model)
     print("generate_possible_states ok")
+    """
     if SMART_PRUNING:
-        possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)]
+        possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)] # This shouldn't be needed anymore, it is already done inside generate_possible_states
         print("states pruning ok")
+    """
 
     
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
