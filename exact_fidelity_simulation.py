@@ -231,7 +231,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.924, 0.923, 0.922, 0.922, 0.92, 0.919, 0.918, 0.917]
+    return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
     return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
     # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
@@ -266,6 +266,27 @@ def set_lookup_dict(working_dict: dict[str, WorkingDictEntry]):
 from typing import Any # pyright: ignore[reportUnusedImport]
 # Tree = Any
 type Tree = str | tuple[Tree, Tree]
+
+# Note: with the current implementation, if the return boolean value is True the fidelity value is meaningless, for optimization reasons
+def is_tree_or_subtree_above_threshold(tree: Tree, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> tuple[bool, float]:
+    if type(tree) == str:
+        fid: None | float = None
+        for key, f in initial_fids:
+            if key == tree:
+                fid = f
+        assert fid is not None
+        return False, fid # individual inputs can never be above the threshold (common assumption in the code)
+    
+    assert type(tree) == tuple
+    left_above, left_fid = is_tree_or_subtree_above_threshold(tree[0], initial_fids, threshold, model)
+    if left_above:
+        return True, 0.5
+    right_above, right_fid = is_tree_or_subtree_above_threshold(tree[0], initial_fids, threshold, model)
+    if right_above:
+        return True, 0.5
+    new_fid = purif_res_fidelity(model, left_fid, right_fid)
+    return new_fid >= threshold, new_fid
+
 
 @lru_cache(maxsize=None)
 def collapse_tree_to_string(t: Tree) -> str:
@@ -315,7 +336,7 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
                     resulting_string = collapse_tree_to_string(tree)
-                    if is_state_above_threshold(resulting_string, initial_fids, threshold, model): # This is not a smart pruning, those states are actually unreachable
+                    if is_tree_or_subtree_above_threshold(tree, initial_fids, threshold, model)[0]: # This is not a smart pruning, those states are actually unreachable
                         continue
                     else:
                         all_possible_single_pair_strings.add(resulting_string)
@@ -481,7 +502,7 @@ def get_key_fidelity_recursive(key: str, initial_fids: list[tuple[str, float]], 
 
 
 def is_state_above_threshold(key: str, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
-    return get_key_fidelity_recursive(key, initial_fids, model) > threshold
+    return get_key_fidelity_recursive(key, initial_fids, model) >= threshold
 
 def state_is_reachable(state_string: StateDescription, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> bool:
     # we return False if some state in the state string has fidelity > threshold
