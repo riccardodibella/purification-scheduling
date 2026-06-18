@@ -393,10 +393,10 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
         for index in range(start_index, len(all_frozensets)):
             fs_at_index = all_frozensets[index]
             if used_keys.isdisjoint(fs_at_index):
-                current_plus_this_fs = current.copy()
-                current_plus_this_fs.append(fs_at_index)
-                to_return.append(tuple(current_plus_this_fs))
-                recursive_build_valid_key_combinations(all_frozensets, index+1, current_plus_this_fs, to_return)
+                current.append(fs_at_index)
+                to_return.append(tuple(current))
+                recursive_build_valid_key_combinations(all_frozensets, index+1, current, to_return)
+                current.pop()
         return to_return
 
     valid_key_combinations: list[tuple[frozenset[str], ...]] = recursive_build_valid_key_combinations(all_frozensets = frozenset_keys, start_index = 0, current = [], to_return = [])
@@ -517,10 +517,6 @@ def state_is_reachable(state_string: StateDescription, initial_fids: list[tuple[
 
 
 
-class CustomEx(Exception):
-    """Exception raised by set_nth_policy_tree to signal that the configuration number is beyond 
-    the available number of policies, and that the search can therefore be stopped"""
-
 def set_stop_policy_to_all(working_dict: dict[StateDescription, WorkingDictEntry]):
     """
     This acts as a safety net in case we stop early in the lookup_dict construction (because the residual counter reaches 0).
@@ -535,139 +531,6 @@ def set_stop_policy_to_all(working_dict: dict[StateDescription, WorkingDictEntry
         assert available_choices[0] == ""
 
         lookup_dict[k] = ""
-
-def set_lookup_policy_from_array(entry_point: StateDescription, working_dict: dict[StateDescription, WorkingDictEntry], arr: list[int]) -> None:
-    set_stop_policy_to_all(working_dict)
-
-    current_front: deque[str] = deque([entry_point])
-    print(current_front)
-    already_added_states: set[str] = set()
-
-    for choice_number in range(len(arr)):
-
-        if len(current_front) == 0:
-            all_zeros_from_here = True
-            for remaining_choice_number in range(choice_number, len(arr)):
-                if arr[remaining_choice_number] != 0:
-                    all_zeros_from_here = False
-                    break
-            if all_zeros_from_here:
-                print("all zeros")
-                break # go to the end and return gracefully
-            else:
-                raise CustomEx("Last too high (non-zero too late)")
-
-
-        state_string = current_front.pop()
-        print("state_string", state_string)
-
-        print(working_dict)
-        if state_string not in working_dict.keys():
-            print(":(")
-            quit()
-        assert state_string in working_dict.keys()
-        
-        actions_for_this_state = working_dict[state_string].possible_actions
-        assert actions_for_this_state is not None
-        num_actions = len(actions_for_this_state)
-        print("num_actions", num_actions)
-        current_choice_index = arr[choice_number]
-        if current_choice_index >= num_actions:
-            raise CustomEx("Last too high (out of bounds action)")
-        chosen_action = actions_for_this_state[current_choice_index]
-        lookup_dict[state_string] = chosen_action
-
-        print("set action ok")
-
-        # append to current_front the new reachable states
-        decoded_choice: list[tuple[str, str]] = decode_choice_description(chosen_action)
-        num_choice_purif_attempts = len(decoded_choice)
-        num_resulting_configurations = 2**num_choice_purif_attempts
-
-        for resulting_config_i in range(num_resulting_configurations):
-            res_state_string: str = state_string # will be modified based on decoded_choice and resulting_config_i
-
-            for bit_number in range(num_choice_purif_attempts):
-                def nth_bit(source_number: int, bit_number: int) -> int:
-                    # https://stackoverflow.com/a/9298889
-                    bit = (source_number >> bit_number) & 1
-                    return bit
-
-                purif_ok = nth_bit(resulting_config_i, bit_number) == 1
-
-                # remove the two input states from the state string (regardless of whether the purification succeeds or not)
-                states_to_discard: list[str] = list(decoded_choice[bit_number])
-                for s in states_to_discard:
-                    assert s in res_state_string
-                    res_state_string = res_state_string.replace(","+s+",", ",").replace(","+s, "").replace(s+",", "").replace(s, "")
-    
-                if purif_ok:
-                    state_string_subparts = res_state_string.split(",")
-                    state_string_subparts.append(encode_purified_pair(decoded_choice[bit_number][0], decoded_choice[bit_number][1]))
-                    state_string_subparts = [s for s in state_string_subparts if s != ""]
-                    res_state_string = encode_state_description_from_sorted_list_str(sorted(state_string_subparts, reverse=False))
-
-            if res_state_string != "" and res_state_string not in already_added_states and res_state_string in working_dict.keys():
-                # The check for working_dict.keys() is here to avoid checking states that have been pruned
-                # This could happen when a state has some parts above the threshold, or if the state cannot ever lead to a new usable pair
-                current_front.append(res_state_string)
-                already_added_states.add(res_state_string)
-    return
-
-def set_nth_policy_tree_mod(entry_point: StateDescription, target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry]) -> None:
-    print(target_config_number)
-    M = 20
-    arr = [0] * M
-    last_valid = arr.copy()
-
-    config_i: int = 0
-    while config_i < target_config_number:
-        print(f"config {config_i}")
-        tail: int = M-1
-        while tail >= 0:
-            print(f"\ttail {tail}")
-            arr[tail] += 1
-            print("\t\t", arr)
-            for i in range(tail+1, M):
-                arr[i] = 0
-            policy_valid = True
-
-            try:
-                set_lookup_policy_from_array(entry_point, working_dict, arr)
-            except CustomEx as e:
-                policy_valid = False
-                print("\t\t", e.args[0])
-            except Exception as e:
-                print("Exception inside loops :(", e)
-                quit()
-            if policy_valid:
-                print(f"valid policy tail {tail}")
-                last_valid = arr.copy()
-                break # where tail >= 0
-            else:
-                arr = last_valid.copy()
-            tail -= 1
-        if tail < 0:
-            # insufficient M or something else broke, or we found the end
-            print(f"Piva Piva l'olio d'oliva target_config_number {target_config_number}")
-            print(arr)
-            raise CustomEx("tail < 0")
-            quit()
-        print(f"found valid policy config_i {config_i} tail {tail}")
-        config_i += 1
-    
-    try:
-        set_lookup_policy_from_array(entry_point, working_dict, arr)
-    except CustomEx as e:
-        print("Problemi! Problemi! Problemi!")
-        print(e.args)
-        quit()
-    except Exception as e:
-        print("Generic problem", e.args)
-        print(arr)
-        quit()
-
-    return
 
 def set_nth_policy_blind(target_config_number: int, working_dict: dict[StateDescription, WorkingDictEntry], possible_states: list[StateDescription]) -> None:
     residual_counter = target_config_number
