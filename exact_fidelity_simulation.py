@@ -273,6 +273,7 @@ def is_tree_or_subtree_above_threshold(tree: Tree, initial_fids: list[tuple[str,
         for key, f in initial_fids:
             if key == tree:
                 fid = f
+                break
         assert fid is not None
         return False, fid # individual inputs can never be above the threshold (common assumption in the code)
     
@@ -280,7 +281,7 @@ def is_tree_or_subtree_above_threshold(tree: Tree, initial_fids: list[tuple[str,
     left_above, left_fid = is_tree_or_subtree_above_threshold(tree[0], initial_fids, threshold, model)
     if left_above:
         return True, 0.5
-    right_above, right_fid = is_tree_or_subtree_above_threshold(tree[0], initial_fids, threshold, model)
+    right_above, right_fid = is_tree_or_subtree_above_threshold(tree[1], initial_fids, threshold, model)
     if right_above:
         return True, 0.5
     new_fid = purif_res_fidelity(model, left_fid, right_fid)
