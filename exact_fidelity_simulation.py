@@ -230,6 +230,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
+    return [0.92, 0.89, 0.65, 0.6, 0.55, 0.51, 0.5]
     return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
     return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
@@ -269,13 +270,17 @@ type Tree = str | tuple[Tree, Tree]
 # Note: with the current implementation, if the return boolean value is True the fidelity value is meaningless, for optimization reasons
 def is_tree_or_subtree_above_threshold(tree: Tree, initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> tuple[bool, float]:
     if type(tree) == str:
-        fid: None | float = None
-        for key, f in initial_fids:
-            if key == tree:
-                fid = f
-                break
-        assert fid is not None
-        return False, fid # individual inputs can never be above the threshold (common assumption in the code)
+        if "+" not in tree:
+            fid: None | float = None
+            for key, f in initial_fids:
+                if key == tree:
+                    fid = f
+                    break
+            assert fid is not None
+            return False, fid # individual inputs can never be above the threshold (common assumption in the code)
+        else:
+            fid = get_key_fidelity_recursive(tree, initial_fids, model)
+            return fid >= threshold, fid
     
     assert type(tree) == tuple
     left_above, left_fid = is_tree_or_subtree_above_threshold(tree[0], initial_fids, threshold, model)
@@ -604,6 +609,48 @@ def set_nth_policy_blind_mod(target_config_number: int, working_dict: dict[State
         return False
     return True
 
+def all_purification_sequence_trees(inputs: list[str]) -> list[Tree]:
+    # https://claude.ai/share/d3eb6410-3c94-4998-b610-59cf306537b4
+
+    if len(inputs) == 1:
+        return [inputs[0]]
+
+    results: list[Tree] = []
+    n = len(inputs)
+
+    for left_size in range(1, n):
+        for other_left_elements_positions in combinations(range(1, n), left_size - 1):
+            left  = [inputs[0]] + [inputs[i] for i in other_left_elements_positions]
+            right = [inputs[i] for i in range(1, n) if i not in other_left_elements_positions]
+
+            left_trees = all_purification_sequence_trees(left)
+            right_trees = all_purification_sequence_trees(right)
+            for left_tree in left_trees:
+                for right_tree in right_trees:
+                    results.append((left_tree, right_tree))
+    return results
+
+def force_only_action_stop(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel, state_string: str):
+    if not SMART_PRUNING:
+        return False
+
+    # From here we do smart pruning
+    inputs: list[str] = state_string.split(",")
+    if(len(inputs) == 1):
+        return True
+
+    possible_trees: list[Tree] = all_purification_sequence_trees(inputs)
+    keep: bool = False
+    for t in possible_trees:
+        assert type(t) is not str
+        if is_tree_or_subtree_above_threshold(t, initial_fids, threshold, model)[0]:
+            keep = True
+            break
+    return not keep
+    
+
+
+
 def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
@@ -619,62 +666,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
     for state_string in possible_states:
         assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
-        only_action_stop = False
-        if SMART_PRUNING:
-            inputs: list[str] = state_string.split(",")
-
-            # This if/elif/else chain could be moved to a separate function
-            if len(inputs) == 2 and not is_state_above_threshold(encode_purified_pair(inputs[0], inputs[1]), initial_fids, threshold, model):
-                only_action_stop = True
-            elif len(inputs) == 3:
-                i = inputs
-                e = encode_purified_pair
-                possible_combinations = [
-                    e(i[0], e(i[1], i[2])),
-                    e(i[1], e(i[0], i[2])),
-                    e(i[2], e(i[0], i[1])),
-                    ]
-                keep: bool = False
-                for c in possible_combinations:
-                    if is_state_above_threshold(c, initial_fids, threshold, model):
-                        keep = True
-                        break
-                if not keep:
-                    only_action_stop = True
-            elif len(inputs) == 4:
-                i = inputs
-                e = encode_purified_pair
-                possible_combinations = [
-                    # Balanced (2+2) splits — 3 combinations
-                    e(e(i[0], i[1]), e(i[2], i[3])),
-                    e(e(i[0], i[2]), e(i[1], i[3])),
-                    e(e(i[0], i[3]), e(i[1], i[2])),
-                    # Linear chain, outer = i[0] — 3 combinations
-                    e(i[0], e(i[1], e(i[2], i[3]))),
-                    e(i[0], e(i[2], e(i[1], i[3]))),
-                    e(i[0], e(i[3], e(i[1], i[2]))),
-                    # Linear chain, outer = i[1] — 3 combinations
-                    e(i[1], e(i[0], e(i[2], i[3]))),
-                    e(i[1], e(i[2], e(i[0], i[3]))),
-                    e(i[1], e(i[3], e(i[0], i[2]))),
-                    # Linear chain, outer = i[2] — 3 combinations
-                    e(i[2], e(i[0], e(i[1], i[3]))),
-                    e(i[2], e(i[1], e(i[0], i[3]))),
-                    e(i[2], e(i[3], e(i[0], i[1]))),
-                    # Linear chain, outer = i[3] — 3 combinations
-                    e(i[3], e(i[0], e(i[1], i[2]))),
-                    e(i[3], e(i[1], e(i[0], i[2]))),
-                    e(i[3], e(i[2], e(i[0], i[1]))),
-                ]
-                keep: bool = False
-                for c in possible_combinations:
-                    if is_state_above_threshold(c, initial_fids, threshold, model):
-                        keep = True
-                        break
-                if not keep:
-                    only_action_stop = True
-            
-
+        only_action_stop = force_only_action_stop(initial_fids, threshold, model, state_string)
+        
         if only_action_stop:
             actions = [""]
         else:
