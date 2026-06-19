@@ -84,7 +84,6 @@ def lookup_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, 
         # Unexpected state! (not in dict)
         print("lookup_policy state not found error")
         print(input_state)
-        print(lookup_dict.keys())
         assert False
     choice_str: ChoiceDescription = lookup_dict[input_state]
     to_return = decode_choice(l, choice_str)
@@ -317,7 +316,7 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
 
     # 1: Generate all possible pairs that we could arrive at
     all_possible_single_pair_strings: set[str] = set()
-    possible_pair_subsets = list(str_powerset(inputs))
+    possible_pair_subsets = str_powerset(inputs)
     for subset in possible_pair_subsets:
 
         def possible_orderings(input: tuple[str, ...]) -> list[tuple[str, ...]]:
@@ -335,10 +334,10 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
                 else:
                     # we have more than 1 pair in this combination: calculate the resulting state string and add it to the set
                     assert type(tree) is tuple
-                    resulting_string = collapse_tree_to_string(tree)
                     if is_tree_or_subtree_above_threshold(tree, initial_fids, threshold, model)[0]: # This is not a smart pruning, those states are actually unreachable
                         continue
                     else:
+                        resulting_string = collapse_tree_to_string(tree)
                         all_possible_single_pair_strings.add(resulting_string)
 
 
