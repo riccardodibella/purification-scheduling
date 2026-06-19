@@ -230,7 +230,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
-    return [0.92, 0.89, 0.65, 0.6, 0.55, 0.51, 0.5]
+    return [0.85, 0.8, 0.72, 0.7, 0.6]
     return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
     return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
@@ -685,22 +685,26 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
 
 
-    """
-    config_count_guess_low = 0
-    config_count_guess_high = config_count
-    while config_count_guess_low < config_count_guess_high:
-        middle = (config_count_guess_low + config_count_guess_high) // 1024
-        valid = set_nth_policy_blind_mod(middle, working_dict, possible_states) and set_nth_policy_blind_mod(middle-1, working_dict, possible_states) and set_nth_policy_blind_mod(middle-2, working_dict, possible_states)  
-        if valid:
-            print(f"{middle} valid")
-            config_count_guess_low = middle + 1
-        else:
-            print(f"{middle} invalid")
-            config_count_guess_high = middle
-    first_invalid = config_count_guess_low
-    print(">>>", first_invalid)
-    """
 
+    config_count_guess: int = 1
+    while config_count_guess < config_count:
+        valid = set_nth_policy_blind_mod(config_count_guess, working_dict, possible_states)
+        if not valid:
+            break
+        config_count_guess = int(config_count_guess*np.random.uniform(0.9, 1.15))
+        # config_count_guess += np.random.randint(1, max(min(np.iinfo(np.int16).max, config_count_guess), 3))
+        config_count_guess += 3
+    config_count = min(config_count_guess, config_count)
+
+    for i in np.logspace(log10(1), log10(config_count), 1000):
+        if i < 0:
+            continue
+        i = int(i)
+        valid = set_nth_policy_blind_mod(i, working_dict, possible_states)
+        if not valid:
+            config_count = i
+            break
+    
 
     best_config_i: int = -1
     best_config_i_usable: float = -1.0
@@ -710,14 +714,6 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         if config_i % 1_000 == 0:
             # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
             print(f"{config_i} (max {config_count})")
-
-        # try:
-        #     set_nth_policy_tree_mod(entry_point, config_i, working_dict)
-        # except CustomEx as e:
-        #     print("CustomEx", e)
-        #     break
-        # except Exception:
-        #     print("AAAAAAAAAA Exception generate_lookup_dict")
 
         valid = set_nth_policy_blind_mod(config_i, working_dict, possible_states)
         if not valid:
