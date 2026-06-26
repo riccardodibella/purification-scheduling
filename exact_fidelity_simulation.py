@@ -28,6 +28,7 @@ if os.environ.get("PYTHONHASHSEED") != "0":
 rng = np.random.default_rng(0)
 
 SMART_PRUNING: bool = True
+RANDOMIZED_LOWER_CONFIG_COUNT: bool = True
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -231,8 +232,8 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
 
 def gen_initial_pairs() -> list[float]:
     return [0.85, 0.8, 0.72, 0.7, 0.6]
-    return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
-    return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
+    # return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
+    # return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
     return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
     # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
     # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
@@ -685,25 +686,25 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
 
 
+    if RANDOMIZED_LOWER_CONFIG_COUNT:
+        config_count_guess: int = 1
+        while config_count_guess < config_count:
+            valid = set_nth_policy_blind_mod(config_count_guess, working_dict, possible_states)
+            if not valid:
+                break
+            config_count_guess = int(config_count_guess*np.random.uniform(0.9, 1.15))
+            # config_count_guess += np.random.randint(1, max(min(np.iinfo(np.int16).max, config_count_guess), 3))
+            config_count_guess += 3
+        config_count = min(config_count_guess, config_count)
 
-    config_count_guess: int = 1
-    while config_count_guess < config_count:
-        valid = set_nth_policy_blind_mod(config_count_guess, working_dict, possible_states)
-        if not valid:
-            break
-        config_count_guess = int(config_count_guess*np.random.uniform(0.9, 1.15))
-        # config_count_guess += np.random.randint(1, max(min(np.iinfo(np.int16).max, config_count_guess), 3))
-        config_count_guess += 3
-    config_count = min(config_count_guess, config_count)
-
-    for i in np.logspace(log10(1), log10(config_count), 1000):
-        if i < 0:
-            continue
-        i = int(i)
-        valid = set_nth_policy_blind_mod(i, working_dict, possible_states)
-        if not valid:
-            config_count = i
-            break
+        for i in np.logspace(log10(1), log10(config_count), 1000):
+            if i < 0:
+                continue
+            i = int(i)
+            valid = set_nth_policy_blind_mod(i, working_dict, possible_states)
+            if not valid:
+                config_count = i
+                break
     
 
     best_config_i: int = -1
