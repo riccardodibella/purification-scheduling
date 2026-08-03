@@ -29,6 +29,7 @@ rng = np.random.default_rng(0)
 
 SMART_PRUNING: bool = True
 RANDOMIZED_LOWER_CONFIG_COUNT: bool = True
+BADPATCH_SAFETY_COEFF: int = 1000 # BADPATCH
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -182,7 +183,6 @@ def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thr
     best_delta_f: float = -1
     best_first_index: int = -1
     best_second_index: int = -1
-    # lllll: list[tuple[tuple[float, float], float]] = []
     for first_index in range(0, len(working_l)-1):
         for second_index in range(first_index+1, len(working_l)):
             f1: float = working_l[first_index][0][1]
@@ -190,22 +190,13 @@ def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thr
             max_f1_f2 = max(f1, f2)
             res_fid = bit_flip_channel_purif_res_fidelity(f1, f2)
             delta_f = res_fid - max_f1_f2
-            # print((f1, f2), "->", delta_f)
-            # lllll.append(((f1, f2), delta_f))
             if delta_f > best_delta_f:
                 best_delta_f = delta_f
                 best_first_index = first_index
                 best_second_index = second_index
-    # lllll = sorted(lllll, key = lambda x: x[1], reverse=True)
-    # print("------------------------")
-    # print(l)
-    # for aaa in lllll:
-    #     print(aaa)
-    # print("------------------------")
     assert best_delta_f >= 0
     assert best_first_index >= 0
     assert best_second_index >= 0
-    # print((best_first_index, best_second_index), (working_l[best_first_index][1], working_l[best_second_index][1]), (0, len(l)-1))
     return [(working_l[best_first_index][1], working_l[best_second_index][1])]
 
 def check_feasible_schedule(choices: list[tuple[int, int]]) -> bool:
@@ -657,11 +648,6 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
     possible_states: list[StateDescription] = generate_possible_states(initial_fids, threshold, model)
     print("generate_possible_states ok")
-    """
-    if SMART_PRUNING:
-        possible_states = [state_string for state_string in possible_states if state_is_reachable(state_string, initial_fids, threshold, model)] # This shouldn't be needed anymore, it is already done inside generate_possible_states
-        print("states pruning ok")
-    """
 
     
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
@@ -692,8 +678,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
             valid = set_nth_policy_blind_mod(config_count_guess, working_dict, possible_states)
             if not valid:
                 break
-            config_count_guess = int(config_count_guess*np.random.uniform(0.9, 1.15))
-            # config_count_guess += np.random.randint(1, max(min(np.iinfo(np.int16).max, config_count_guess), 3))
+            config_count_guess = int(config_count_guess*rng.uniform(0.9, 1.15))
+            # config_count_guess += rng.randint(1, max(min(np.iinfo(np.int16).max, config_count_guess), 3))
             config_count_guess += 3
         config_count = min(config_count_guess, config_count)
 
@@ -711,6 +697,8 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     best_config_i_usable: float = -1.0
     best_config_i_steps: float = math.inf
     config_i: int = 0
+    print(f"BADPATCH {config_count} -> {config_count*BADPATCH_SAFETY_COEFF}") # BADPATCH
+    config_count *= BADPATCH_SAFETY_COEFF # BADPATCH
     while config_i < config_count:
         if config_i % 1_000 == 0:
             # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
@@ -718,8 +706,10 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
 
         valid = set_nth_policy_blind_mod(config_i, working_dict, possible_states)
         if not valid:
-            print(f"Stopped search early at {config_i}")
-            break
+            # print(f"Stopped search early at {config_i}")
+            # break
+            config_i += 1 # BADPATCH
+            continue # BADPATCH
 
         end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
         avg_usable = average_usable_pairs_from_distribution(end_distribution)
