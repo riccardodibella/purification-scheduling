@@ -1,0 +1,21 @@
+Rough first draft of the DAG classes, outdated.
+
+ActionItem:
+    state_string: StateDescription (str)
+    choice: ChoiceDescription (str)
+    resulting_children: list[ tuple[ list[int] , DAGNode ] ]
+
+DAGNode:
+    # Topological info
+    parents: list[DAGNode]
+    state_string: StateDescription (str)
+    actions: list[ActionItem]
+    children: list[DAGNode]
+
+PurificationDAG:
+    entry_point_string: StateDescription
+    threshold: float
+    root: DAGNode
+    nodes: dict[StateDescription, DAGNode]
+    
+
