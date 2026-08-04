@@ -239,21 +239,28 @@ class DAGNode:
     state_string: StateDescription # str
     actions: list[ActionItem]
     actions_generated: bool # used as a safety check to ensure that we visit each node only once when we build the DAG structure
+
+    # Search info
     best_action_chosen: bool
     chosen_action_index: int
+    best_action_avg_usable: float
+    best_action_avg_steps: float
 
     def __init__(self, state_string: StateDescription) -> None:
         self.parents = set() # filled by the main DAG object
         self.state_string = state_string
         self.actions = []
         self.actions_generated = False
+
         self.best_action_chosen = False
         self.chosen_action_index = -1
+        self.best_action_avg_usable = 0.0
+        self.best_action_avg_steps = 0.0
 
     def add_action(self, action_item: ActionItem) -> None:
         self.actions.append(action_item)
 
-    def set_chosen_action(self, index_or_choice_descr: int | ChoiceDescription):
+    def set_chosen_action(self, index_or_choice_descr: int | ChoiceDescription, avg_usable: float, avg_steps: float):
         if isinstance(index_or_choice_descr, ChoiceDescription):
             index: int = -1
             for i, a in enumerate(self.actions):
@@ -267,6 +274,11 @@ class DAGNode:
         assert index < len(self.actions)
         self.chosen_action_index = index
         self.best_action_chosen = True
+        assert avg_usable >= 0
+        assert avg_steps >= 0
+        assert avg_steps != math.inf
+        self.best_action_avg_usable = avg_usable
+        self.best_action_avg_steps = avg_steps
 
 
 class PurificationDAG:
@@ -373,8 +385,42 @@ class PurificationDAG:
             current_node.actions_generated = True
         print("construct_DAG finished")
 
-def recursive_optimal_setup(dag: PurificationDAG) -> None:
-    dag.root.set_chosen_action("")
+def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[float, float]: # (avg_usable, avg_steps)
+    assert node.state_string in dag.nodes_dict
+    assert node is dag.nodes_dict[node.state_string] # exact equality of memory address; they must be the same object in memory (just a sanity check for my mental model)
+    assert node.actions_generated
+
+    if node.best_action_chosen:
+        return (node.best_action_avg_usable, node.best_action_avg_steps)
+
+    assert len(node.actions) > 0, "recursive_optimal_setup_core unexpected node with empty actions list, there should always be at least an empty \"\" action"
+
+    best_action_index: int = -1
+    best_avg_usable: float = -1
+    best_avg_steps: float = math.inf
+
+    for action_index, action in enumerate(node.actions):
+        if action.choice == "":
+            avg_usable = 0.0
+            avg_steps = 0.0
+        else:
+            assert len(action.resulting_children) > 0
+            avg_usable = 0.0
+            avg_steps = 0.0
+            for _, outcome_probability, outcome_usable, child_node in action.resulting_children:
+                child_avg_usable, child_avg_steps = recursive_optimal_setup_core(dag, child_node)
+                avg_usable += (outcome_usable + child_avg_usable) * outcome_probability
+                avg_steps +=  child_avg_steps * outcome_probability
+            avg_steps += 1 # include the cost of the current operation (which is not "stop immediately"), regardless of the outcomes and their probabilities
+        if (avg_usable > best_avg_usable) or ((avg_usable == best_avg_usable) and (avg_steps < best_avg_steps)):
+            best_avg_usable = avg_usable
+            best_avg_steps = avg_steps
+            best_action_index = action_index
+    node.set_chosen_action(best_action_index, avg_usable=best_avg_usable, avg_steps=best_avg_steps)   
+    return (node.best_action_avg_usable, node.best_action_avg_steps)
+
+def recursive_optimal_setup_main(dag: PurificationDAG) -> None:
+    recursive_optimal_setup_core(dag, dag.root)
 
 class PurificationDAGPolicy:
     dag: PurificationDAG
@@ -550,7 +596,7 @@ if __name__ == "__main__":
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
     dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
-    recursive_optimal_setup(dag)
+    recursive_optimal_setup_main(dag)
     dag_policy = PurificationDAGPolicy(dag)
     for policy in [dag_policy]:
             end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
