@@ -1,13 +1,14 @@
 # pyright: strict
+from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from itertools import chain, combinations, permutations, product
 import math
 from typing import Callable
-from math import log10, ceil
 import numpy as np
 from enum import Enum, auto
-import time # pyright: ignore[reportUnusedImport]
+import heapq
+import time
 from functools import lru_cache # pyright: ignore[reportUnusedImport]
 
 """
@@ -35,6 +36,9 @@ PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]
 
 StateDescription = str
 ChoiceDescription = str
+
+ActionsGenerator = Callable[[StateDescription], list[ChoiceDescription]]
+
 lookup_dict: dict[StateDescription, ChoiceDescription] = {}
 
 def sort_fid_named_list(l: list[tuple[str, float]], highestFirst: bool = True) -> list[tuple[str, float]]:
@@ -122,7 +126,7 @@ def all_pairs_policy_opposite(l: list[tuple[str, float]], thresh: float) -> list
 def gen_initial_named_pairs() -> list[tuple[str, float]]:
     fids: list[float] = gen_initial_pairs()
     fids = sorted(fids, reverse=True)
-    num_chars = ceil(log10(len(fids)))
+    num_chars = math.ceil(math.log10(len(fids)))
     to_return = [(f"{i}".zfill(num_chars), fids[i]) for i in range(len(fids))]
     return to_return
 
@@ -222,6 +226,7 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     return usable_counter, remaining_pairs
 
 def gen_initial_pairs() -> list[float]:
+    return [0.91, 0.88, 0.85, 0.8]
     return [0.85, 0.8, 0.72, 0.7, 0.6]
     # return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
     # return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
@@ -309,7 +314,6 @@ def all_trees(elements: tuple[str, ...]) -> list[Tree]:
 def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel) -> list[StateDescription]:
     to_return: list[str] = []
 
-    print("generate_possible_states start")
     inputs: list[str] = [f[0] for f in initial_fids]
 
     # 1: Generate all possible pairs that we could arrive at
@@ -643,11 +647,11 @@ def force_only_action_stop(initial_fids: list[tuple[str, float]], threshold: flo
 
 
 
-def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
+def generate_lookup_dict_BADPATCH(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     # generate_immediate_termination_lookup_dict(initial_fids, threshold, model)
 
     possible_states: list[StateDescription] = generate_possible_states(initial_fids, threshold, model)
-    print("generate_possible_states ok")
+    # print("generate_possible_states ok")
 
     
     working_dict: dict[StateDescription, WorkingDictEntry] = {}
@@ -661,7 +665,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
             actions: list[ChoiceDescription] = generate_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
 
-    print("generate_possible_actions ok")
+    # print("generate_possible_actions ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
     for state_string in possible_states:
@@ -683,7 +687,7 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
             config_count_guess += 3
         config_count = min(config_count_guess, config_count)
 
-        for i in np.logspace(log10(1), log10(config_count), 1000):
+        for i in np.logspace(math.log10(1), math.log10(config_count), 1000):
             if i < 0:
                 continue
             i = int(i)
@@ -697,12 +701,13 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     best_config_i_usable: float = -1.0
     best_config_i_steps: float = math.inf
     config_i: int = 0
-    print(f"BADPATCH {config_count} -> {config_count*BADPATCH_SAFETY_COEFF}") # BADPATCH
+    # print(f"BADPATCH {config_count} -> {config_count*BADPATCH_SAFETY_COEFF}") # BADPATCH
     config_count *= BADPATCH_SAFETY_COEFF # BADPATCH
     while config_i < config_count:
-        if config_i % 1_000 == 0:
+        if config_i % 10_000 == 0:
             # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
-            print(f"{config_i} (max {config_count})")
+            # print(f"{config_i} (max {config_count})")
+            pass
 
         valid = set_nth_policy_blind_mod(config_i, working_dict, possible_states)
         if not valid:
@@ -721,12 +726,291 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         
         config_i += 1
     
-    print(f"Total configurations traversed: {config_i+1}")
+    # print(f"Total configurations traversed: {config_i+1}")
     
-    print(f"Best configuration index: {best_config_i}")
+    # print(f"Best configuration index: {best_config_i}")
     valid = set_nth_policy_blind_mod(best_config_i, working_dict, possible_states)
     assert valid is True
     return
+
+
+def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
+
+    possible_states: list[StateDescription] = generate_possible_states(initial_fids, threshold, model)
+    # print("generate_possible_states ok")
+
+    
+    working_dict: dict[StateDescription, WorkingDictEntry] = {}
+    for state_string in possible_states:
+        assert state_string not in working_dict # if we catch a duplicated state string, we need to add a de-duplication step (with a set) at the end of generate_possible_states
+        only_action_stop = force_only_action_stop(initial_fids, threshold, model, state_string)
+        
+        if only_action_stop:
+            actions = [""]
+        else:
+            actions: list[ChoiceDescription] = generate_possible_actions(state_string)
+        working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
+
+    # print("generate_possible_actions ok")
+
+    config_count = 1 # It is (should be...) a valid upper bound even for tree generation
+    for state_string in possible_states:
+        p_a = working_dict[state_string].possible_actions
+        assert p_a is not None
+        config_count *= len(p_a)
+
+    entry_point = encode_state_description(initial_fids) # pyright: ignore[reportUnusedVariable]
+
+    best_config_i: int = -1
+    best_config_i_usable: float = -1.0
+    best_config_i_steps: float = math.inf
+    config_i: int = 0
+    while config_i < config_count:
+        if config_i % 10_000 == 0:
+            # print(f"{config_i}/{config_count} ({config_i/config_count*100}%)")
+            # print(f"{config_i} (max {config_count})")
+            pass
+
+        set_nth_policy_blind(config_i, working_dict, possible_states)
+
+
+        end_distribution = exact_recursive_simulation(lookup_policy, initial_fids, threshold, model)
+        avg_usable = average_usable_pairs_from_distribution(end_distribution)
+        avg_steps = average_steps_from_distribution(end_distribution)
+        if(avg_usable > best_config_i_usable or (avg_usable == best_config_i_usable and avg_steps < best_config_i_steps)):
+            best_config_i = config_i
+            best_config_i_usable = avg_usable
+            best_config_i_steps = avg_steps
+        
+        config_i += 1
+    
+    # print(f"Total configurations traversed: {config_i+1}")
+    
+    # print(f"Best configuration index: {best_config_i}")
+    set_nth_policy_blind(best_config_i, working_dict, possible_states)
+    return
+
+class ActionItem:
+    state_string: StateDescription
+    choice: ChoiceDescription
+
+    # The first element is the bitstring (list of bools) associated with the outcome for that children
+    # The second element is the probability of having this outcome
+    # The third element is the number of usable pairs generated in that transition
+    # The fourth element is the child node
+    resulting_children: list[ tuple[ list[bool], float, int , DAGNode ] ]
+    def __init__(self, state_string: StateDescription, choice: ChoiceDescription, resulting_children: list[ tuple[ list[bool], float, int , DAGNode ] ]) -> None:
+        self.state_string = state_string
+        self.choice = choice
+        self.resulting_children = resulting_children
+
+class DAGNode:
+    # Topological info
+    parents: set[DAGNode]
+    state_string: StateDescription # str
+    actions: list[ActionItem]
+    actions_generated: bool # used as a safety check to ensure that we visit each node only once when we build the DAG structure
+
+    # Search info
+    best_action_chosen: bool
+    chosen_action_index: int
+    best_action_avg_usable: float
+    best_action_avg_steps: float
+
+    def __init__(self, state_string: StateDescription) -> None:
+        self.parents = set() # filled by the main DAG object
+        self.state_string = state_string
+        self.actions = []
+        self.actions_generated = False
+
+        self.best_action_chosen = False
+        self.chosen_action_index = -1
+        self.best_action_avg_usable = 0.0
+        self.best_action_avg_steps = 0.0
+
+    def add_action(self, action_item: ActionItem) -> None:
+        self.actions.append(action_item)
+
+    def set_chosen_action(self, index_or_choice_descr: int | ChoiceDescription, avg_usable: float, avg_steps: float):
+        if isinstance(index_or_choice_descr, ChoiceDescription):
+            index: int = -1
+            for i, a in enumerate(self.actions):
+                if a.choice == index_or_choice_descr:
+                    index = i
+                    break
+        else:
+            assert isinstance(index_or_choice_descr, int)
+            index = index_or_choice_descr
+        assert index >= 0
+        assert index < len(self.actions)
+        self.chosen_action_index = index
+        self.best_action_chosen = True
+        assert avg_usable >= 0
+        assert avg_steps >= 0
+        assert avg_steps != math.inf
+        self.best_action_avg_usable = avg_usable
+        self.best_action_avg_steps = avg_steps
+
+
+class PurificationDAG:
+    initial_pairs: list[tuple[str, float]]
+    entry_point_string: StateDescription
+    threshold: float
+    root: DAGNode
+    model: PurificationModel
+    nodes_dict: dict[StateDescription, DAGNode]
+
+    def __init__(self, initial_pairs: list[tuple[str, float]], threshold: float, model: PurificationModel, actions_generator: ActionsGenerator | None = None) -> None:
+        self.initial_pairs = initial_pairs
+        self.entry_point_string = encode_state_description(initial_pairs)
+        self.threshold = threshold
+        self.model = model
+        self.nodes_dict = {}
+
+        self.root = self.add_node(node_state_string=self.entry_point_string, parent=None) # bootstrap the construction process
+
+        if actions_generator is not None:
+            self.construct_DAG(actions_generator)
+
+    def add_node(self, node_state_string: StateDescription, parent: StateDescription | DAGNode | None) -> DAGNode:
+        # This function is a no-op if we are adding a node with the same parent (possibly None) multiple times
+
+        if node_state_string not in self.nodes_dict:
+            node = DAGNode(node_state_string)
+            self.nodes_dict[node_state_string] = node
+        else:
+            node = self.nodes_dict[node_state_string]
+        assert node is not None
+        if parent is not None:
+            if isinstance(parent, StateDescription):
+                assert parent in self.nodes_dict
+                parent = self.nodes_dict[parent]
+            assert isinstance(parent, DAGNode)
+            node.parents.add(parent)
+        return node
+
+    def construct_DAG(self, actions_generator: ActionsGenerator) -> None:
+        assert self.root is not None
+        assert self.root.actions_generated is False
+
+        hq: list[tuple[int, str, str | None]] = [] # heap with the nodes to be evaluated
+        def _priority(s: StateDescription) -> int:
+            return -1 * len(s.split(',')) # sort based on how many different inputs are there in the state
+        heapq.heappush(hq, (_priority(self.entry_point_string), self.entry_point_string, None))
+        while len(hq) != 0:
+            _, current_state_string, parent_state_string = heapq.heappop(hq)
+            parent_node: DAGNode | None = self.nodes_dict[parent_state_string] if parent_state_string is not None else None
+            current_node: DAGNode = self.add_node(node_state_string=current_state_string, parent=parent_node)
+
+            # We must do this check after doing add_node in order to always register the new parent of this node,
+            # regardless of whether we already visited it and generated its actions or not
+            if current_node.actions_generated:
+                continue # We have already visited this node and generated its actions: nothing else to do, go to the next node in hq
+            
+            actions: list[ChoiceDescription] = actions_generator(current_state_string)
+            current_state_keys_set: set[str] = set(current_state_string.split(","))
+            for action_string in actions:
+                decoded_key_pairs: list[tuple[str, str]] = decode_choice_description(action_string)
+                assert all([ x in current_state_keys_set and y in current_state_keys_set for (x, y) in decoded_key_pairs])
+                resulting_children: list[tuple[list[bool], float, int, DAGNode]] = []
+                num_action_choices: int = len(decoded_key_pairs)
+                outcome_bitstrings: list[list[bool]] = bitstrings(num_action_choices)
+                for bstring in outcome_bitstrings:
+                    if len(bstring) == 0: # This handles the case where action_string == "" ("stop immediately" action)
+                        continue
+                    assert len(bstring) == len(decoded_key_pairs)
+                    set_to_modify: set[str] = current_state_keys_set.copy()
+                    generated_usable_pairs: int = 0
+                    outcome_probability: float = 1.0
+                    for i in range(len(bstring)):
+                        input_keys: tuple[str, str] = decoded_key_pairs[i]
+                        assert input_keys[0] in set_to_modify
+                        assert input_keys[1] in set_to_modify
+                        set_to_modify.remove(input_keys[0])
+                        set_to_modify.remove(input_keys[1])
+
+                        success: bool = bstring[i]
+                        input_fids: tuple[float, ...] = tuple([get_key_fidelity_recursive(k, self.initial_pairs, self.model) for k in input_keys])
+                        assert len(input_fids) == 2
+                        success_probability: float = purif_ok_prob(self.model, input_fids[0], input_fids[1])
+                        if success:
+                            new_key: str = encode_purified_pair(input_keys[0], input_keys[1])
+                            if is_state_above_threshold(key=new_key, initial_fids=self.initial_pairs, threshold=self.threshold, model=self.model):
+                                generated_usable_pairs += 1
+                            else:
+                                set_to_modify.add(new_key)
+                            outcome_probability *= success_probability
+                        else:
+                            outcome_probability *= (1.0 - success_probability)
+                    outcome_result_keys: list[str] = sorted(list(set_to_modify), reverse=False) # Lexicographic ascending order
+                    outcome_result_str: StateDescription = encode_state_description_from_sorted_list_str(outcome_result_keys)
+                    new_node: DAGNode = self.add_node(node_state_string=outcome_result_str, parent=current_node)
+                    resulting_children.append((bstring, outcome_probability, generated_usable_pairs, new_node))
+                    # We add the new node to hq regardless of wheter its actions are already generated or not, because we still need to add the current node to its parents
+                    heapq.heappush(hq, (_priority(new_node.state_string), new_node.state_string, current_node.state_string))
+                if action_string == "":
+                    assert len(resulting_children) == 0
+                ai = ActionItem(current_state_string, action_string, resulting_children)
+                current_node.add_action(ai)
+                
+            current_node.actions_generated = True
+        print("construct_DAG finished")
+
+def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[float, float]: # (avg_usable, avg_steps)
+    assert node.state_string in dag.nodes_dict
+    assert node is dag.nodes_dict[node.state_string] # exact equality of memory address; they must be the same object in memory (just a sanity check for my mental model)
+    assert node.actions_generated
+
+    if node.best_action_chosen:
+        return (node.best_action_avg_usable, node.best_action_avg_steps)
+
+    assert len(node.actions) > 0, "recursive_optimal_setup_core unexpected node with empty actions list, there should always be at least an empty \"\" action"
+
+    best_action_index: int = -1
+    best_avg_usable: float = -1
+    best_avg_steps: float = math.inf
+
+    for action_index, action in enumerate(node.actions):
+        if action.choice == "":
+            avg_usable = 0.0
+            avg_steps = 0.0
+        else:
+            assert len(action.resulting_children) > 0
+            avg_usable = 0.0
+            avg_steps = 0.0
+            for _, outcome_probability, outcome_usable, child_node in action.resulting_children:
+                child_avg_usable, child_avg_steps = recursive_optimal_setup_core(dag, child_node)
+                avg_usable += (outcome_usable + child_avg_usable) * outcome_probability
+                avg_steps +=  child_avg_steps * outcome_probability
+            avg_steps += 1 # include the cost of the current operation (which is not "stop immediately"), regardless of the outcomes and their probabilities
+        if (avg_usable > best_avg_usable) or ((avg_usable == best_avg_usable) and (avg_steps < best_avg_steps)):
+            best_avg_usable = avg_usable
+            best_avg_steps = avg_steps
+            best_action_index = action_index
+    node.set_chosen_action(best_action_index, avg_usable=best_avg_usable, avg_steps=best_avg_steps)   
+    return (node.best_action_avg_usable, node.best_action_avg_steps)
+
+def recursive_optimal_setup_main(dag: PurificationDAG) -> None:
+    recursive_optimal_setup_core(dag, dag.root)
+
+class PurificationDAGPolicy:
+    dag: PurificationDAG
+    __name__ = "PurificationDAGPolicy"
+    def __init__(self, dag: PurificationDAG) -> None:
+        self.dag = dag
+    def __call__(self, l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+        input_state: StateDescription = encode_state_description(l)
+        assert input_state in self.dag.nodes_dict.keys(), f"PurificationDAGPolicy state |{input_state}| not found"
+        node: DAGNode = self.dag.nodes_dict[input_state]
+        assert node.best_action_chosen
+        action_index: int = node.chosen_action_index
+        assert action_index >= 0
+        assert action_index < len(node.actions)
+        assert node.actions[action_index].state_string == node.state_string
+        choice_str: ChoiceDescription = node.actions[action_index].choice
+        to_return = decode_choice(l, choice_str)
+        return to_return
+
 
 def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
     """
@@ -817,9 +1101,21 @@ if __name__ == "__main__":
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
+
+    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
+    recursive_optimal_setup_main(dag)
+    dag_policy = PurificationDAGPolicy(dag)
+    res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+
     generate_lookup_dict(input_fid_list, threshold, model)
-    for policy in [lookup_policy, single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, all_pairs_policy_opposite, bit_flip_highest_deltaF_single_choice_policy]:
-        end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
-        print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
+    res_dict = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
+    
+    generate_lookup_dict_BADPATCH(input_fid_list, threshold, model)
+    res_dict_BADPATCH = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
+
+    print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+    print(f"generate_lookup_dict:\t\t{average_usable_pairs_from_distribution(res_dict)} ({average_steps_from_distribution(res_dict)} steps)")
+    print(f"generate_lookup_dict_BADPATCH:\t{average_usable_pairs_from_distribution(res_dict_BADPATCH)} ({average_steps_from_distribution(res_dict_BADPATCH)} steps)")
+        
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
