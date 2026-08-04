@@ -122,9 +122,21 @@ def all_pairs_policy_opposite(l: list[tuple[str, float]], thresh: float) -> list
         pairs += [(idx1, idx2)]
     return pairs
 
+def gen_initial_pairs() -> list[float]:
+    return [0.91, 0.88, 0.85, 0.8]
+    return [0.85, 0.8, 0.72, 0.7, 0.6]
+    # return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
+    # return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
+    return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
+    # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
+    # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
+    # return [0.88, 0.85, 0.8, 0.7, 0.6]
+    # return [0.88, 0.85, 0.8, 0.7]
+    # return [0.88, 0.85, 0.8]
+    # return [0.9, 0.9]
 
-def gen_initial_named_pairs() -> list[tuple[str, float]]:
-    fids: list[float] = gen_initial_pairs()
+def gen_initial_named_pairs(pair_generator: Callable[[], list[float]] = gen_initial_pairs) -> list[tuple[str, float]]:
+    fids: list[float] = pair_generator()
     fids = sorted(fids, reverse=True)
     num_chars = math.ceil(math.log10(len(fids)))
     to_return = [(f"{i}".zfill(num_chars), fids[i]) for i in range(len(fids))]
@@ -224,19 +236,6 @@ def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tup
     remaining_pairs = [p for p in pairs if p[1] < threshold]
     usable_counter = len(pairs) - len(remaining_pairs)
     return usable_counter, remaining_pairs
-
-def gen_initial_pairs() -> list[float]:
-    return [0.91, 0.88, 0.85, 0.8]
-    return [0.85, 0.8, 0.72, 0.7, 0.6]
-    # return [0.924, 0.923, 0.922, 0.922, 0.921, 0.92, 0.919, 0.918]
-    # return [0.92, 0.915, 0.91, 0.905, 0.9025, 0.90, 0.895, 0.89]
-    return [0.92, 0.915, 0.91, 0.905, 0.90, 0.895, 0.89]
-    # return [0.9, 0.88, 0.85, 0.8, 0.7, 0.6, 0.51, 0.5]
-    # return [0.88, 0.85, 0.8, 0.7, 0.6, 0.55]
-    # return [0.88, 0.85, 0.8, 0.7, 0.6]
-    # return [0.88, 0.85, 0.8, 0.7]
-    # return [0.88, 0.85, 0.8]
-    # return [0.9, 0.9]
 
 def generate_immediate_termination_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel):
     initial_state = encode_state_description(initial_fids)
@@ -954,7 +953,7 @@ class PurificationDAG:
                 current_node.add_action(ai)
                 
             current_node.actions_generated = True
-        print("construct_DAG finished")
+        # print("construct_DAG finished")
 
 def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[float, float]: # (avg_usable, avg_steps)
     assert node.state_string in dag.nodes_dict
@@ -1100,22 +1099,29 @@ if __name__ == "__main__":
     prog_start_time = time.time()
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
-    input_fid_list = gen_initial_named_pairs()
+    NUM_TESTS = 10
+    for i in range(10):
+        print(f"TEST {i+1}/{NUM_TESTS}")
+        def _input_generator() -> list[float]:
+            to_return = sorted([rng.uniform(0.9, 0.92) for _ in range(4)], reverse=True)
+            print(to_return)
+            return to_return
+        input_fid_list = gen_initial_named_pairs(_input_generator)
 
-    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
-    recursive_optimal_setup_main(dag)
-    dag_policy = PurificationDAGPolicy(dag)
-    res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
+        recursive_optimal_setup_main(dag)
+        dag_policy = PurificationDAGPolicy(dag)
+        res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
 
-    generate_lookup_dict(input_fid_list, threshold, model)
-    res_dict = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
-    
-    generate_lookup_dict_BADPATCH(input_fid_list, threshold, model)
-    res_dict_BADPATCH = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
+        generate_lookup_dict(input_fid_list, threshold, model)
+        res_dict = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
 
-    print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
-    print(f"generate_lookup_dict:\t\t{average_usable_pairs_from_distribution(res_dict)} ({average_steps_from_distribution(res_dict)} steps)")
-    print(f"generate_lookup_dict_BADPATCH:\t{average_usable_pairs_from_distribution(res_dict_BADPATCH)} ({average_steps_from_distribution(res_dict_BADPATCH)} steps)")
+        generate_lookup_dict_BADPATCH(input_fid_list, threshold, model)
+        res_dict_BADPATCH = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
+
+        print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+        print(f"generate_lookup_dict:\t\t{average_usable_pairs_from_distribution(res_dict)} ({average_steps_from_distribution(res_dict)} steps)")
+        print(f"generate_lookup_dict_BADPATCH:\t{average_usable_pairs_from_distribution(res_dict_BADPATCH)} ({average_steps_from_distribution(res_dict_BADPATCH)} steps)")
         
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
