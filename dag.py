@@ -237,17 +237,37 @@ class DAGNode:
     # Topological info
     parents: set[DAGNode]
     state_string: StateDescription # str
-    actions_generated: bool # used as a safety check to ensure that we visit each node only once when we build the DAG structure
     actions: list[ActionItem]
+    actions_generated: bool # used as a safety check to ensure that we visit each node only once when we build the DAG structure
+    best_action_chosen: bool
+    chosen_action_index: int
 
     def __init__(self, state_string: StateDescription) -> None:
         self.parents = set() # filled by the main DAG object
         self.state_string = state_string
         self.actions = []
         self.actions_generated = False
+        self.best_action_chosen = False
+        self.chosen_action_index = -1
 
     def add_action(self, action_item: ActionItem) -> None:
         self.actions.append(action_item)
+
+    def set_chosen_action(self, index_or_choice_descr: int | ChoiceDescription):
+        if isinstance(index_or_choice_descr, ChoiceDescription):
+            index: int = -1
+            for i, a in enumerate(self.actions):
+                if a.choice == index_or_choice_descr:
+                    index = i
+                    break
+        else:
+            assert isinstance(index_or_choice_descr, int)
+            index = index_or_choice_descr
+        assert index >= 0
+        assert index < len(self.actions)
+        self.chosen_action_index = index
+        self.best_action_chosen = True
+
 
 class PurificationDAG:
     initial_pairs: list[tuple[str, float]]
@@ -352,7 +372,177 @@ class PurificationDAG:
                 
             current_node.actions_generated = True
         print("construct_DAG finished")
-        
+
+def recursive_optimal_setup(dag: PurificationDAG) -> None:
+    dag.root.set_chosen_action("")
+
+class PurificationDAGPolicy:
+    dag: PurificationDAG
+    __name__ = "PurificationDAGPolicy"
+    def __init__(self, dag: PurificationDAG) -> None:
+        self.dag = dag
+    def __call__(self, l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+        input_state: StateDescription = encode_state_description(l)
+        assert input_state in self.dag.nodes_dict.keys(), f"PurificationDAGPolicy state |{input_state}| not found"
+        node: DAGNode = self.dag.nodes_dict[input_state]
+        assert node.best_action_chosen
+        action_index: int = node.chosen_action_index
+        assert action_index >= 0
+        assert action_index < len(node.actions)
+        assert node.actions[action_index].state_string == node.state_string
+        choice_str: ChoiceDescription = node.actions[action_index].choice
+        to_return = decode_choice(l, choice_str)
+        return to_return
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def check_feasible_schedule(choices: list[tuple[int, int]]) -> bool:
+    # we don't check that all the choices are made within the length of the list
+    # we just check that choices don't overlap, and therefore that no pair of choices have a qubit in common
+    
+    count_dict: dict[int, int] = {}
+    for two_qubits_choice in choices:
+        for qubit_index in two_qubits_choice:
+            count_dict[qubit_index] = count_dict.get(qubit_index, 0) + 1
+
+    for k in count_dict.keys():
+        if count_dict[k] > 1:
+            return False
+    return True
+    
+def filter_usable_pairs(pairs: list[tuple[str, float]], threshold: float) -> tuple[int, list[tuple[str, float]]]:
+    remaining_pairs = [p for p in pairs if p[1] < threshold]
+    usable_counter = len(pairs) - len(remaining_pairs)
+    return usable_counter, remaining_pairs
+
+def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tuple[str, float]], fidelity_threshold: float, model: PurificationModel, previous_iterations: int = 0) -> list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]:
+    """
+    Return type: [(probability, (# of usable pairs, # of iterations, [(remaining_keys, remaining_fids)]))]
+    """
+    if(len(input_fidelities) < 2):
+        return [(1, (0, previous_iterations, input_fidelities))]
+    
+    list_after_current_step: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
+    choices = policy(input_fidelities, fidelity_threshold)
+    assert check_feasible_schedule(choices)
+
+    if len(choices) == 0:
+        # empty choice list means that the purification path ends here and leftover pairs stay unused
+        return [(1, (0, previous_iterations, input_fidelities))]
+
+    choices_ok_probabilities = [purif_ok_prob(model, input_fidelities[c[0]][1], input_fidelities[c[1]][1]) for c in choices]
+    choices_res_fidelities: list[tuple[str, float]] = [(
+            encode_purified_pair(input_fidelities[c[0]][0],input_fidelities[c[1]][0]),
+            purif_res_fidelity(model, input_fidelities[c[0]][1], input_fidelities[c[1]][1])
+        ) for c in choices]
+    
+    bss = bitstrings(len(choices))
+    for outcome_i in range(2**len(choices)):
+        outcome_bitstring = bss[outcome_i]
+
+        # Calculation of outcome probability
+        outcome_probability = 1.0
+        for choice_i in range(len(choices)):
+            choice_outcome = outcome_bitstring[choice_i]
+            outcome_ok_probability = choices_ok_probabilities[choice_i]
+            outcome_probability *= outcome_ok_probability if choice_outcome is True else (1.0 - outcome_ok_probability)
+
+        # Calculation of resulting fidelities list (before usable pairs filtering)
+        outcome_fidelities: list[tuple[str, float]] = input_fidelities.copy()
+        new_fidelities: list[tuple[str, float]] = []
+        for choice_i in range(len(choices)):
+            c = choices[choice_i]
+            choice_outcome = outcome_bitstring[choice_i]
+            if choice_outcome is True:
+                new_fidelities += [choices_res_fidelities[choice_i]]
+            outcome_fidelities[c[0]] = (outcome_fidelities[c[0]][0], -1)
+            outcome_fidelities[c[1]] = (outcome_fidelities[c[1]][0], -1)
+        outcome_fidelities = [f for f in outcome_fidelities if f[1] >= 0] # filter out the -1s
+        outcome_fidelities += new_fidelities
+
+        outcome_fidelities = sort_str_named_list(outcome_fidelities)
+
+        # Filter usable pairs based on the fidelity threshold
+        outcome_usable_pairs, outcome_filtered_fidelities = filter_usable_pairs(outcome_fidelities, fidelity_threshold)
+
+        list_after_current_step += [(outcome_probability, (outcome_usable_pairs, previous_iterations+1, outcome_filtered_fidelities))]
+
+
+    list_after_recursion: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
+    for current_outcome_prob, (current_outcome_usable, current_outcome_iter, current_outcome_remaining_fids) in list_after_current_step:
+        recursion_results = exact_recursive_simulation(policy, current_outcome_remaining_fids, fidelity_threshold, model, current_outcome_iter)
+        for res_prob, (res_usable, res_iter, res_remaining_fids) in recursion_results:
+            new_entry = (
+                    current_outcome_prob * res_prob,
+                (
+                    current_outcome_usable + res_usable,
+                    res_iter,
+                    res_remaining_fids
+                )
+            )
+            list_after_recursion.append(new_entry)
+    return list_after_recursion
+
+def average_usable_pairs_from_distribution(distribution: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]) -> float: 
+    ret = 0.0
+    for entry in distribution:
+        prob = entry[0]
+        usable = entry[1][0]
+        ret += prob * float(usable)
+    return ret
+
+def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]]) -> float: 
+    ret = 0.0
+    for entry in distribution:
+        prob = entry[0]
+        steps = entry[1][1]
+        ret += prob * float(steps)
+    return ret
 
 if __name__ == "__main__":
     prog_start_time = time.time()
@@ -360,5 +550,10 @@ if __name__ == "__main__":
     model = PurificationModel.BIT_FLIP
     input_fid_list = gen_initial_named_pairs()
     dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
+    recursive_optimal_setup(dag)
+    dag_policy = PurificationDAGPolicy(dag)
+    for policy in [dag_policy]:
+            end_distribution = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+            print(f"{policy.__name__}: {average_usable_pairs_from_distribution(end_distribution)} ({average_steps_from_distribution(end_distribution)} steps)")
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
