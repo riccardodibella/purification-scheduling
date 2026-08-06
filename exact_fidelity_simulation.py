@@ -11,10 +11,10 @@ import heapq
 import time
 from functools import lru_cache # pyright: ignore[reportUnusedImport]
 
-"""
+#"""
 # pyright: basic
-from line_profiler import profile # PYTHONHASHSEED=0 kernprof -l -v exact_fidelity_simulation.py
-"""
+from line_profiler import profile # PYTHONHASHSEED=0 PYTHONOPTIMIZE=1 kernprof -l -v exact_fidelity_simulation.py
+#"""
 
 import os
 import sys
@@ -431,7 +431,7 @@ def generate_possible_states(initial_fids: list[tuple[str, float]], threshold: f
         to_return.append(encode_state_description_from_sorted_list_str(sorted_combination))
     return to_return
 
-def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
+def generate_all_possible_actions(state_str: StateDescription) -> list[ChoiceDescription]:
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
         return [""]
@@ -463,7 +463,19 @@ def generate_possible_actions(state_str: StateDescription) -> list[ChoiceDescrip
             to_return.append(choice_string)
     return to_return
 
+@profile
+def generate_single_pair_actions(state_str: StateDescription) -> list[ChoiceDescription]:
+    input_states: list[str] = state_str.split(",")
+    if len(input_states) < 2:
+        return [""]
+    to_return: list[ChoiceDescription] = [""]
+    all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(input_states)), 2))
+    for index_a, index_b in all_possible_single_pairs:
+        to_return.append(f"{input_states[index_a]}:{input_states[index_b]}")
+    return to_return
+
 @lru_cache(maxsize=None)
+@profile
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
     if key[0] != "<":
@@ -663,10 +675,10 @@ def generate_lookup_dict_BADPATCH(initial_fids: list[tuple[str, float]], thresho
         if only_action_stop:
             actions = [""]
         else:
-            actions: list[ChoiceDescription] = generate_possible_actions(state_string)
+            actions: list[ChoiceDescription] = generate_all_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
 
-    # print("generate_possible_actions ok")
+    # print("generate_all_possible_actions ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
     for state_string in possible_states:
@@ -749,10 +761,10 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
         if only_action_stop:
             actions = [""]
         else:
-            actions: list[ChoiceDescription] = generate_possible_actions(state_string)
+            actions: list[ChoiceDescription] = generate_all_possible_actions(state_string)
         working_dict[state_string] = WorkingDictEntry(action=None, definitive=False, possible_actions=actions)
 
-    # print("generate_possible_actions ok")
+    # print("generate_all_possible_actions ok")
 
     config_count = 1 # It is (should be...) a valid upper bound even for tree generation
     for state_string in possible_states:
@@ -873,6 +885,7 @@ class PurificationDAG:
         if actions_generator is not None:
             self.construct_DAG(actions_generator)
 
+    @profile
     def add_node(self, node_state_string: StateDescription, parent: StateDescription | DAGNode | None) -> DAGNode:
         # This function is a no-op if we are adding a node with the same parent (possibly None) multiple times
 
@@ -890,24 +903,25 @@ class PurificationDAG:
             node.parents.add(parent)
         return node
 
+    @profile
     def construct_DAG(self, actions_generator: ActionsGenerator) -> None:
         assert self.root is not None
         assert self.root.actions_generated is False
 
-        hq: list[tuple[int, str, str | None]] = [] # heap with the nodes to be evaluated
+        initial_pairs_tuple: tuple[tuple[str, float], ...] = tuple(self.initial_pairs)
+
+        hq: list[tuple[int, str]] = [] # heap with the nodes to be evaluated
         def _priority(s: StateDescription) -> int:
             return -1 * len(s.split(',')) # sort based on how many different inputs are there in the state
-        heapq.heappush(hq, (_priority(self.entry_point_string), self.entry_point_string, None))
+        heapq.heappush(hq, (_priority(self.entry_point_string), self.entry_point_string))
         while len(hq) != 0:
-            _, current_state_string, parent_state_string = heapq.heappop(hq)
-            parent_node: DAGNode | None = self.nodes_dict[parent_state_string] if parent_state_string is not None else None
-            current_node: DAGNode = self.add_node(node_state_string=current_state_string, parent=parent_node)
+            _, current_state_string = heapq.heappop(hq)
+            assert current_state_string in self.nodes_dict
+            current_node: DAGNode = self.nodes_dict[current_state_string]
 
-            # We must do this check after doing add_node in order to always register the new parent of this node,
-            # regardless of whether we already visited it and generated its actions or not
             if current_node.actions_generated:
-                continue # We have already visited this node and generated its actions: nothing else to do, go to the next node in hq
-            
+                continue # nothing else to do
+
             actions: list[ChoiceDescription] = actions_generator(current_state_string)
             current_state_keys_set: set[str] = set(current_state_string.split(","))
             for action_string in actions:
@@ -931,9 +945,9 @@ class PurificationDAG:
                         set_to_modify.remove(input_keys[1])
 
                         success: bool = bstring[i]
-                        input_fids: tuple[float, ...] = tuple([get_key_fidelity_recursive(k, self.initial_pairs, self.model) for k in input_keys])
-                        assert len(input_fids) == 2
-                        success_probability: float = purif_ok_prob(self.model, input_fids[0], input_fids[1])
+                        input_fid_0 = get_key_fidelity_recursive_tuple_fids(input_keys[0], initial_pairs_tuple, self.model)
+                        input_fid_1 = get_key_fidelity_recursive_tuple_fids(input_keys[1], initial_pairs_tuple, self.model)
+                        success_probability: float = purif_ok_prob(self.model, input_fid_0, input_fid_1)
                         if success:
                             new_key: str = encode_purified_pair(input_keys[0], input_keys[1])
                             if is_state_above_threshold(key=new_key, initial_fids=self.initial_pairs, threshold=self.threshold, model=self.model):
@@ -947,13 +961,13 @@ class PurificationDAG:
                     outcome_result_str: StateDescription = encode_state_description_from_sorted_list_str(outcome_result_keys)
                     new_node: DAGNode = self.add_node(node_state_string=outcome_result_str, parent=current_node)
                     resulting_children.append((bstring, outcome_probability, generated_usable_pairs, new_node))
-                    # We add the new node to hq regardless of wheter its actions are already generated or not, because we still need to add the current node to its parents
-                    heapq.heappush(hq, (_priority(new_node.state_string), new_node.state_string, current_node.state_string))
+                    if not new_node.actions_generated:
+                        heapq.heappush(hq, (_priority(new_node.state_string), new_node.state_string))
                 if action_string == "":
                     assert len(resulting_children) == 0
                 ai = ActionItem(current_state_string, action_string, resulting_children)
                 current_node.add_action(ai)
-                
+
             current_node.actions_generated = True
         # print("construct_DAG finished")
 
@@ -1111,7 +1125,7 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
 
 def small_input_high_fid_equality_test() -> None:
     prog_start_time = time.time()
-    threshold = 0.926
+    threshold = 0.925
     model = PurificationModel.BIT_FLIP
     NUM_TESTS = 100
     for i in range(NUM_TESTS):
@@ -1121,7 +1135,7 @@ def small_input_high_fid_equality_test() -> None:
             return to_return
         input_fid_list = gen_initial_named_pairs(_input_generator)
 
-        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_possible_actions)
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_all_possible_actions)
         recursive_optimal_setup_main(dag)
         dag_policy = PurificationDAGPolicy(dag)
         res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
@@ -1153,5 +1167,26 @@ def small_input_high_fid_equality_test() -> None:
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
+def playground_main() -> None:
+    prog_start_time = time.time()
+    threshold = 0.925
+    model = PurificationModel.BIT_FLIP
+
+    def _input_generator() -> list[float]:
+        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(11)], reverse=True)
+        return to_return
+    input_fid_list = gen_initial_named_pairs(_input_generator)
+
+    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_single_pair_actions)
+    recursive_optimal_setup_main(dag)
+    dag_policy = PurificationDAGPolicy(dag)
+    res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+    assert np.allclose([average_usable_pairs_from_distribution(res_dag), average_steps_from_distribution(res_dag)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+
+    print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
+
 if __name__ == "__main__":
-    small_input_high_fid_equality_test()
+    playground_main()
