@@ -1095,16 +1095,16 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
         ret += prob * float(steps)
     return ret
 
-if __name__ == "__main__":
+
+def small_input_high_fid_equality_test() -> None:
     prog_start_time = time.time()
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
-    NUM_TESTS = 10
+    NUM_TESTS = 100
     for i in range(10):
         print(f"TEST {i+1}/{NUM_TESTS}")
         def _input_generator() -> list[float]:
-            to_return = sorted([rng.uniform(0.9, 0.92) for _ in range(4)], reverse=True)
-            print(to_return)
+            to_return = sorted([rng.uniform(0.9, threshold) for _ in range(4)], reverse=True)
             return to_return
         input_fid_list = gen_initial_named_pairs(_input_generator)
 
@@ -1112,6 +1112,7 @@ if __name__ == "__main__":
         recursive_optimal_setup_main(dag)
         dag_policy = PurificationDAGPolicy(dag)
         res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res_dag), average_steps_from_distribution(res_dag)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
 
         generate_lookup_dict(input_fid_list, threshold, model)
         res_dict = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
@@ -1119,9 +1120,21 @@ if __name__ == "__main__":
         generate_lookup_dict_BADPATCH(input_fid_list, threshold, model)
         res_dict_BADPATCH = exact_recursive_simulation(lookup_policy, input_fid_list, threshold, model)
 
-        print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
-        print(f"generate_lookup_dict:\t\t{average_usable_pairs_from_distribution(res_dict)} ({average_steps_from_distribution(res_dict)} steps)")
-        print(f"generate_lookup_dict_BADPATCH:\t{average_usable_pairs_from_distribution(res_dict_BADPATCH)} ({average_steps_from_distribution(res_dict_BADPATCH)} steps)")
-        
+        if not (
+            (average_usable_pairs_from_distribution(res_dag) == average_usable_pairs_from_distribution(res_dict) and average_usable_pairs_from_distribution(res_dict) == average_usable_pairs_from_distribution(res_dict_BADPATCH))
+            and
+            (average_steps_from_distribution(res_dag) == average_steps_from_distribution(res_dict) and average_steps_from_distribution(res_dict) == average_steps_from_distribution(res_dict_BADPATCH))
+        ):
+            print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+            print(f"generate_lookup_dict:\t\t{average_usable_pairs_from_distribution(res_dict)} ({average_steps_from_distribution(res_dict)} steps)")
+            print(f"generate_lookup_dict_BADPATCH:\t{average_usable_pairs_from_distribution(res_dict_BADPATCH)} ({average_steps_from_distribution(res_dict_BADPATCH)} steps)")
+            print(f"1st term equality: {average_usable_pairs_from_distribution(res_dag) == average_usable_pairs_from_distribution(res_dict) and average_usable_pairs_from_distribution(res_dict) == average_usable_pairs_from_distribution(res_dict_BADPATCH)}")
+            print(f"2nd term equality: {average_steps_from_distribution(res_dag) == average_steps_from_distribution(res_dict) and average_steps_from_distribution(res_dict) == average_steps_from_distribution(res_dict_BADPATCH)}")
+            print(f"DAG root: {[dag.root.best_action_avg_usable,dag.root.best_action_avg_steps]}")
+            print("TEST FAILED")
+            break
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
+
+if __name__ == "__main__":
+    small_input_high_fid_equality_test()
