@@ -7,7 +7,6 @@ import math
 from typing import Callable
 import numpy as np
 from enum import Enum, auto
-import heapq
 import time
 from functools import lru_cache # pyright: ignore[reportUnusedImport]
 
@@ -468,7 +467,7 @@ def generate_single_pair_actions(state_str: StateDescription) -> list[ChoiceDesc
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
         return [""]
-    to_return: list[ChoiceDescription] = [""]
+    to_return: list[ChoiceDescription] = [""] # always include the "stop now" action
     all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(input_states)), 2))
     for index_a, index_b in all_possible_single_pairs:
         to_return.append(f"{input_states[index_a]}:{input_states[index_b]}")
@@ -804,7 +803,6 @@ def generate_lookup_dict(initial_fids: list[tuple[str, float]], threshold: float
     return
 
 class ActionItem:
-    state_string: StateDescription
     choice: ChoiceDescription
 
     # The first element is the bitstring (list of bools) associated with the outcome for that children
@@ -812,8 +810,7 @@ class ActionItem:
     # The third element is the number of usable pairs generated in that transition
     # The fourth element is the child node
     resulting_children: list[ tuple[ list[bool], float, int , DAGNode ] ]
-    def __init__(self, state_string: StateDescription, choice: ChoiceDescription, resulting_children: list[ tuple[ list[bool], float, int , DAGNode ] ]) -> None:
-        self.state_string = state_string
+    def __init__(self, choice: ChoiceDescription, resulting_children: list[ tuple[ list[bool], float, int , DAGNode ] ]) -> None:
         self.choice = choice
         self.resulting_children = resulting_children
 
@@ -900,17 +897,14 @@ class PurificationDAG:
 
         initial_pairs_tuple: tuple[tuple[str, float], ...] = tuple(self.initial_pairs)
 
-        hq: list[tuple[int, str]] = [] # heap with the nodes to be evaluated
-        def _priority(s: StateDescription) -> int:
-            return -1 * len(s.split(',')) # sort based on how many different inputs are there in the state
-        heapq.heappush(hq, (_priority(self.entry_point_string), self.entry_point_string))
-        while len(hq) != 0:
-            _, current_state_string = heapq.heappop(hq)
+        to_expand: set[str] = set()
+        to_expand.add(self.entry_point_string)
+        while len(to_expand) != 0:
+            current_state_string = to_expand.pop()
             assert current_state_string in self.nodes_dict
             current_node: DAGNode = self.nodes_dict[current_state_string]
 
-            if current_node.actions_generated:
-                continue # nothing else to do
+            assert not current_node.actions_generated
 
             actions: list[ChoiceDescription] = actions_generator(current_state_string)
             current_state_keys_set: set[str] = set(current_state_string.split(","))
@@ -952,10 +946,10 @@ class PurificationDAG:
                     new_node: DAGNode = self.add_node(node_state_string=outcome_result_str)
                     resulting_children.append((bstring, outcome_probability, generated_usable_pairs, new_node))
                     if not new_node.actions_generated:
-                        heapq.heappush(hq, (_priority(new_node.state_string), new_node.state_string))
+                        to_expand.add(new_node.state_string)
                 if action_string == "":
                     assert len(resulting_children) == 0
-                ai = ActionItem(current_state_string, action_string, resulting_children)
+                ai = ActionItem(action_string, resulting_children)
                 current_node.add_action(ai)
 
             current_node.actions_generated = True
@@ -1022,7 +1016,6 @@ class PurificationDAGPolicy:
         action_index: int = node.chosen_action_index
         assert action_index >= 0
         assert action_index < len(node.actions)
-        assert node.actions[action_index].state_string == node.state_string
         choice_str: ChoiceDescription = node.actions[action_index].choice
         to_return = decode_choice(l, choice_str)
         return to_return
@@ -1163,7 +1156,7 @@ def playground_main() -> None:
     model = PurificationModel.BIT_FLIP
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(11)], reverse=True)
+        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(12)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
