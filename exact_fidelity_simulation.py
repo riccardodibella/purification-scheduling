@@ -32,6 +32,8 @@ SMART_PRUNING: bool = True
 RANDOMIZED_LOWER_CONFIG_COUNT: bool = True
 BADPATCH_SAFETY_COEFF: int = 1000 # BADPATCH
 
+ULP_UNITS_EQUALITY_TOLERANCE = 1
+
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
 StateDescription = str
@@ -955,6 +957,10 @@ class PurificationDAG:
             current_node.actions_generated = True
         # print("construct_DAG finished")
 
+def within_equality_tolerance(a: float, b: float) -> bool:
+    ulp_unit: float = math.ulp(max(abs(a), abs(b)))
+    return a - b <= ULP_UNITS_EQUALITY_TOLERANCE*ulp_unit
+
 def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[float, float]: # (avg_usable, avg_steps)
     assert node.state_string in dag.nodes_dict
     assert node is dag.nodes_dict[node.state_string] # exact equality of memory address; they must be the same object in memory (just a sanity check for my mental model)
@@ -982,10 +988,17 @@ def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[f
                 avg_usable += (outcome_usable + child_avg_usable) * outcome_probability
                 avg_steps +=  child_avg_steps * outcome_probability
             avg_steps += 1 # include the cost of the current operation (which is not "stop immediately"), regardless of the outcomes and their probabilities
-        if (avg_usable > best_avg_usable) or ((avg_usable == best_avg_usable) and (avg_steps < best_avg_steps)):
+        
+        if ((avg_usable > best_avg_usable) and not ((avg_steps > best_avg_steps) and (within_equality_tolerance(avg_usable, best_avg_usable)))) or ((avg_usable == best_avg_usable) and (avg_steps < best_avg_steps)) or (avg_usable < best_avg_usable and avg_steps < best_avg_steps and within_equality_tolerance(avg_usable, best_avg_usable)):
             best_avg_usable = avg_usable
             best_avg_steps = avg_steps
             best_action_index = action_index
+            # print(f"current candidate\tstate \"{action.state_string}\" choice \"{action.choice}\" (index {action_index}) usable {avg_usable} steps {avg_steps}")
+        else:
+            # print(f"discarded choice\tstate \"{action.state_string}\" choice \"{action.choice}\" (index {action_index}) usable {avg_usable} steps {avg_steps}")
+            pass
+
+    # print(f"CHOSEN BEST ACTION\tstate {node.actions[best_action_index].state_string} choice {node.actions[best_action_index].choice} (index {best_action_index}) usable {best_avg_usable} steps {best_avg_steps}")
     node.set_chosen_action(best_action_index, avg_usable=best_avg_usable, avg_steps=best_avg_steps)   
     return (node.best_action_avg_usable, node.best_action_avg_steps)
 
@@ -1098,10 +1111,10 @@ def average_steps_from_distribution(distribution: list[tuple[float, tuple[int, i
 
 def small_input_high_fid_equality_test() -> None:
     prog_start_time = time.time()
-    threshold = 0.925
+    threshold = 0.926
     model = PurificationModel.BIT_FLIP
     NUM_TESTS = 100
-    for i in range(10):
+    for i in range(NUM_TESTS):
         print(f"TEST {i+1}/{NUM_TESTS}")
         def _input_generator() -> list[float]:
             to_return = sorted([rng.uniform(0.9, threshold) for _ in range(4)], reverse=True)
@@ -1131,8 +1144,12 @@ def small_input_high_fid_equality_test() -> None:
             print(f"1st term equality: {average_usable_pairs_from_distribution(res_dag) == average_usable_pairs_from_distribution(res_dict) and average_usable_pairs_from_distribution(res_dict) == average_usable_pairs_from_distribution(res_dict_BADPATCH)}")
             print(f"2nd term equality: {average_steps_from_distribution(res_dag) == average_steps_from_distribution(res_dict) and average_steps_from_distribution(res_dict) == average_steps_from_distribution(res_dict_BADPATCH)}")
             print(f"DAG root: {[dag.root.best_action_avg_usable,dag.root.best_action_avg_steps]}")
+
+            print(res_dag)
+            print(res_dict)
             print("TEST FAILED")
             break
+
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
