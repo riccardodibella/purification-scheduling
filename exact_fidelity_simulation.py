@@ -10,10 +10,10 @@ from enum import Enum, auto
 import time
 from functools import lru_cache # pyright: ignore[reportUnusedImport]
 
-#"""
+"""
 # pyright: basic
 from line_profiler import profile # PYTHONHASHSEED=0 PYTHONOPTIMIZE=1 kernprof -l -v exact_fidelity_simulation.py
-#"""
+"""
 
 import os
 import sys
@@ -462,7 +462,6 @@ def generate_all_possible_actions(state_str: StateDescription) -> list[ChoiceDes
             to_return.append(choice_string)
     return to_return
 
-@profile
 def generate_single_pair_actions(state_str: StateDescription) -> list[ChoiceDescription]:
     input_states: list[str] = state_str.split(",")
     if len(input_states) < 2:
@@ -473,8 +472,29 @@ def generate_single_pair_actions(state_str: StateDescription) -> list[ChoiceDesc
         to_return.append(f"{input_states[index_a]}:{input_states[index_b]}")
     return to_return
 
+def get_sorted_fid_generator(initial_fids: list[tuple[str, float]], model: PurificationModel):
+    tuple_initial_fids: tuple[tuple[str, float], ...] = tuple(initial_fids)
+    def sorted_fid_generator(state_str: StateDescription) -> list[ChoiceDescription]:
+        input_states: list[str] = state_str.split(",")
+        if len(input_states) < 2:
+            return [""]
+        states_with_fid: list[tuple[str, float]] = [(key, get_key_fidelity_recursive_tuple_fids(key, tuple_initial_fids, model)) for key in input_states]
+        states_with_fid = sort_fid_named_list(states_with_fid, highestFirst=True)
+        to_return: list[ChoiceDescription] = [""]
+
+        working_string = ""
+        for how_many_to_take in range(0, len(states_with_fid) // 2):
+            if working_string != "":
+                working_string += ","
+            a: str = states_with_fid[2*how_many_to_take][0]
+            b: str = states_with_fid[2*how_many_to_take+1][0]                
+            working_string += f"{a}:{b}"
+                
+            to_return.append(working_string)
+        return to_return
+    return sorted_fid_generator
+
 @lru_cache(maxsize=None)
-@profile
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
     if key[0] != "<":
@@ -880,7 +900,6 @@ class PurificationDAG:
         if actions_generator is not None:
             self.construct_DAG(actions_generator)
 
-    @profile
     def add_node(self, node_state_string: StateDescription) -> DAGNode:
         if node_state_string not in self.nodes_dict:
             node = DAGNode(node_state_string)
@@ -890,7 +909,6 @@ class PurificationDAG:
         assert node is not None
         return node
 
-    @profile
     def construct_DAG(self, actions_generator: ActionsGenerator) -> None:
         assert self.root is not None
         assert self.root.actions_generated is False
@@ -1156,17 +1174,19 @@ def playground_main() -> None:
     model = PurificationModel.BIT_FLIP
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(12)], reverse=True)
+        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(7)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
-    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, generate_single_pair_actions)
-    recursive_optimal_setup_main(dag)
-    dag_policy = PurificationDAGPolicy(dag)
-    res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
-    assert np.allclose([average_usable_pairs_from_distribution(res_dag), average_steps_from_distribution(res_dag)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+    actions_generators: list[ActionsGenerator] = [generate_all_possible_actions, generate_single_pair_actions, get_sorted_fid_generator(input_fid_list, model)]
+    for a_g in actions_generators:
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
+        recursive_optimal_setup_main(dag)
+        dag_policy = PurificationDAGPolicy(dag)
+        res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res_dag), average_steps_from_distribution(res_dag)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
 
-    print(f"recursive_optimal_setup_main:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+        print(f"{a_g.__name__}:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
 
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
