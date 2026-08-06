@@ -819,7 +819,6 @@ class ActionItem:
 
 class DAGNode:
     # Topological info
-    parents: set[DAGNode]
     state_string: StateDescription # str
     actions: list[ActionItem]
     actions_generated: bool # used as a safety check to ensure that we visit each node only once when we build the DAG structure
@@ -831,7 +830,6 @@ class DAGNode:
     best_action_avg_steps: float
 
     def __init__(self, state_string: StateDescription) -> None:
-        self.parents = set() # filled by the main DAG object
         self.state_string = state_string
         self.actions = []
         self.actions_generated = False
@@ -880,27 +878,19 @@ class PurificationDAG:
         self.model = model
         self.nodes_dict = {}
 
-        self.root = self.add_node(node_state_string=self.entry_point_string, parent=None) # bootstrap the construction process
+        self.root = self.add_node(node_state_string=self.entry_point_string) # bootstrap the construction process
 
         if actions_generator is not None:
             self.construct_DAG(actions_generator)
 
     @profile
-    def add_node(self, node_state_string: StateDescription, parent: StateDescription | DAGNode | None) -> DAGNode:
-        # This function is a no-op if we are adding a node with the same parent (possibly None) multiple times
-
+    def add_node(self, node_state_string: StateDescription) -> DAGNode:
         if node_state_string not in self.nodes_dict:
             node = DAGNode(node_state_string)
             self.nodes_dict[node_state_string] = node
         else:
             node = self.nodes_dict[node_state_string]
         assert node is not None
-        if parent is not None:
-            if isinstance(parent, StateDescription):
-                assert parent in self.nodes_dict
-                parent = self.nodes_dict[parent]
-            assert isinstance(parent, DAGNode)
-            node.parents.add(parent)
         return node
 
     @profile
@@ -959,7 +949,7 @@ class PurificationDAG:
                             outcome_probability *= (1.0 - success_probability)
                     outcome_result_keys: list[str] = sorted(list(set_to_modify), reverse=False) # Lexicographic ascending order
                     outcome_result_str: StateDescription = encode_state_description_from_sorted_list_str(outcome_result_keys)
-                    new_node: DAGNode = self.add_node(node_state_string=outcome_result_str, parent=current_node)
+                    new_node: DAGNode = self.add_node(node_state_string=outcome_result_str)
                     resulting_children.append((bstring, outcome_probability, generated_usable_pairs, new_node))
                     if not new_node.actions_generated:
                         heapq.heappush(hq, (_priority(new_node.state_string), new_node.state_string))
