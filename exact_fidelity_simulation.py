@@ -521,7 +521,8 @@ def get_sorted_increment_generator(initial_fids: list[tuple[str, float]], model:
                     chosen_pair = pair
                     best_increment = increment
             assert chosen_pair is not None
-            assert best_increment >= 0
+            if best_increment < 0: # This could happen under the werner model
+                break
 
             if working_string != "":
                 working_string += ","
@@ -541,6 +542,71 @@ def get_sorted_increment_generator(initial_fids: list[tuple[str, float]], model:
         # print(f"SIG {state_str} {to_return}")
         return to_return
     return sorted_increment_generator
+
+def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], model: PurificationModel):
+    tuple_initial_fids: tuple[tuple[str, float], ...] = tuple(initial_fids)
+
+    def _f(states_with_fid: list[tuple[str, float]], starting_string: str) -> list[ChoiceDescription]:
+        if len(states_with_fid) < 2:
+            return []
+        if starting_string != "":
+            starting_string += ","
+        if len(states_with_fid) == 2:
+            return [starting_string+f"{states_with_fid[0][0]}:{states_with_fid[1][0]}"]
+                
+        fid_states_copy: list[tuple[str, float]] = states_with_fid.copy()
+        inc_states_copy: list[tuple[str, float]] = states_with_fid.copy()
+
+        # Working pair with the highest fidelity
+        fid_states_copy = sort_fid_named_list(fid_states_copy, highestFirst=True)
+        fid_working_str = starting_string + f"{fid_states_copy[0][0]}:{fid_states_copy[1][0]}"
+        fid_states_copy = fid_states_copy[2:]
+
+        to_return: list[ChoiceDescription] = []
+        to_return.append(fid_working_str)
+        fid_additional_actions = _f(fid_states_copy, fid_working_str)
+        inc_additional_actions: list[ChoiceDescription] = []
+
+
+        all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(inc_states_copy)), 2))
+        chosen_pair: None | tuple[int, int] = None
+        best_increment: float = -math.inf
+        for pair in all_possible_single_pairs:
+            fid_a: float = inc_states_copy[pair[0]][1]
+            fid_b: float = inc_states_copy[pair[1]][1]
+            max_fid: float = max(fid_a, fid_b)
+            out_fid: float = purif_res_fidelity(model, fid_a, fid_b)
+            increment = out_fid - max_fid
+            if increment > best_increment:
+                chosen_pair = pair
+                best_increment = increment
+        assert chosen_pair is not None
+        if best_increment >= 0: # This may not happen under the werner model
+            inc_working_str = starting_string + f"{inc_states_copy[chosen_pair[0]][0]}:{inc_states_copy[chosen_pair[1]][0]}"
+            assert chosen_pair[1] > chosen_pair[0]
+            del inc_states_copy[chosen_pair[1]]
+            del inc_states_copy[chosen_pair[0]]
+            to_return.append(inc_working_str)
+            inc_additional_actions = _f(inc_states_copy, inc_working_str)
+        
+        to_return += fid_additional_actions
+        to_return += inc_additional_actions
+
+        return to_return
+    
+    def sorted_fid_increment_generator(state_str: StateDescription) -> list[ChoiceDescription]:
+        input_states: list[str] = state_str.split(",")
+        if len(input_states) < 2:
+            return [""]
+        states_with_fid: list[tuple[str, float]] = [(key, get_key_fidelity_recursive_tuple_fids(key, tuple_initial_fids, model)) for key in input_states]
+
+        to_return: list[ChoiceDescription] = [""]
+        generated: list[ChoiceDescription] = _f(states_with_fid, "")
+        to_return += generated
+        
+        # print(f"SFI {state_str} {to_return}")
+        return to_return
+    return sorted_fid_increment_generator
 
 @lru_cache(maxsize=None)
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
@@ -1219,14 +1285,14 @@ def small_input_high_fid_equality_test() -> None:
 def playground_main() -> None:
     prog_start_time = time.time()
     threshold = 0.925
-    model = PurificationModel.BIT_FLIP
+    model = PurificationModel.WERNER
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(25)], reverse=True)
+        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(15)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
-    actions_generators: list[ActionsGenerator] = [get_sorted_fid_generator(input_fid_list, model), get_sorted_increment_generator(input_fid_list, model)]
+    actions_generators: list[ActionsGenerator] = [get_sorted_fid_generator(input_fid_list, model), get_sorted_increment_generator(input_fid_list, model), get_sorted_fid_increment_generator(input_fid_list, model)]
     for a_g in actions_generators:
         dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
         recursive_optimal_setup_main(dag)
