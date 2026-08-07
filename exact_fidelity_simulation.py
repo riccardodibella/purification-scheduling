@@ -1371,15 +1371,16 @@ def fidelity_increment_sorting_test() -> None:
 
 def playground_main() -> None:
     prog_start_time = time.time()
-    threshold = 0.925
-    model = PurificationModel.WERNER
+    threshold = 0.9
+    model = PurificationModel.BIT_FLIP
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(16)], reverse=True)
+        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(10)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
     actions_generators: list[ActionsGenerator] = [
+            generate_single_pair_actions,
             get_sorted_fid_generator(input_fid_list, model), 
             get_sorted_increment_generator(input_fid_list, model), 
             get_sorted_fid_increment_generator(input_fid_list, model)
@@ -1387,16 +1388,16 @@ def playground_main() -> None:
     for a_g in actions_generators:
         dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
         recursive_optimal_setup_main(dag)
-        dag_policy = PurificationDAGPolicy(dag)
-        res_dag = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
-        assert np.allclose([average_usable_pairs_from_distribution(res_dag), average_steps_from_distribution(res_dag)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+        policy = PurificationDAGPolicy(dag)
+        res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
 
-        print(f"{a_g.__name__}:\t{average_usable_pairs_from_distribution(res_dag)} ({average_steps_from_distribution(res_dag)} steps)")
+        print(f"{a_g.__name__.ljust(30)}: {average_usable_pairs_from_distribution(res)} ({average_steps_from_distribution(res)} steps)")
 
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
 if __name__ == "__main__":
     # small_input_high_fid_equality_test()
-    fidelity_increment_sorting_test()
-    # playground_main()
+    # fidelity_increment_sorting_test()
+    playground_main()
