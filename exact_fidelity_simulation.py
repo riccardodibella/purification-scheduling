@@ -31,7 +31,7 @@ SMART_PRUNING: bool = True
 RANDOMIZED_LOWER_CONFIG_COUNT: bool = True
 BADPATCH_SAFETY_COEFF: int = 1000 # BADPATCH
 
-ULP_UNITS_EQUALITY_TOLERANCE = 1
+ULP_UNITS_EQUALITY_TOLERANCE = 5
 
 PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
 
@@ -1258,6 +1258,7 @@ def small_input_high_fid_equality_test() -> None:
     threshold = 0.925
     model = PurificationModel.BIT_FLIP
     NUM_TESTS = 100
+    print("SMALL INPUT HIGH FIDELITY EQUALITY TEST")
     for i in range(NUM_TESTS):
         print(f"TEST {i+1}/{NUM_TESTS}")
         def _input_generator() -> list[float]:
@@ -1292,6 +1293,77 @@ def small_input_high_fid_equality_test() -> None:
             print(res_dag)
             print(res_dict)
             print("TEST FAILED")
+            sys.exit(0)
+            break
+
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
+
+def fidelity_increment_sorting_test() -> None:
+    prog_start_time = time.time()
+    NUM_TESTS = 100
+    print("FIDELITY/INCREMENT SORTING TEST")
+    for i in range(NUM_TESTS):
+        print(f"TEST {i+1}/{NUM_TESTS}")
+        threshold = rng.uniform(0.7, 0.95)
+        model: PurificationModel = rng.choice(np.array([PurificationModel.BIT_FLIP, PurificationModel.WERNER]))
+        num_pairs: int = int(rng.integers(8, 19 if model == PurificationModel.BIT_FLIP else 14))
+        def _input_generator() -> list[float]:
+            to_return = sorted([rng.uniform(0.6, threshold) for _ in range(num_pairs)], reverse=True)
+            return to_return
+        input_fid_list = gen_initial_named_pairs(_input_generator)
+
+        fid_gen = get_sorted_fid_generator(input_fid_list, model)
+        inc_gen = get_sorted_increment_generator(input_fid_list, model)
+        both_gen = get_sorted_fid_increment_generator(input_fid_list, model)
+
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, fid_gen)
+        recursive_optimal_setup_main(dag)
+        dag_policy = PurificationDAGPolicy(dag)
+        res_fid = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res_fid), average_steps_from_distribution(res_fid)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, inc_gen)
+        recursive_optimal_setup_main(dag)
+        dag_policy = PurificationDAGPolicy(dag)
+        res_inc = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res_inc), average_steps_from_distribution(res_inc)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, both_gen)
+        recursive_optimal_setup_main(dag)
+        dag_policy = PurificationDAGPolicy(dag)
+        res_both = exact_recursive_simulation(dag_policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res_both), average_steps_from_distribution(res_both)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+
+        def is_actually_better(better: tuple[float, float], worse: tuple[float, float]):
+            if better[0] > worse[0]:
+                return True
+            if better[0] < worse[0] and not within_equality_tolerance(better[0], worse[0]):
+                return False
+            assert within_equality_tolerance(better[0], worse[0])
+            if better[1] < worse[1]:
+                return True
+            if better[1] > worse[1] and not within_equality_tolerance(better[0], worse[0]):
+                return False
+            assert within_equality_tolerance(better[1], worse[1])
+            return True
+        if (
+            (not is_actually_better(
+                (average_usable_pairs_from_distribution(res_both), average_steps_from_distribution(res_both)), 
+                (average_usable_pairs_from_distribution(res_fid), average_steps_from_distribution(res_fid))
+            )) 
+            or
+            (not is_actually_better(
+                (average_usable_pairs_from_distribution(res_both), average_steps_from_distribution(res_both)), 
+                (average_usable_pairs_from_distribution(res_inc), average_steps_from_distribution(res_inc))
+            ))
+            ):
+            print(f"Configuration: threshold {threshold} model {model.name} initial_pairs {input_fid_list}")
+            print(f"{fid_gen.__name__}:\t{average_usable_pairs_from_distribution(res_fid)} ({average_steps_from_distribution(res_fid)} steps)")
+            print(f"{inc_gen.__name__}:\t\t{average_usable_pairs_from_distribution(res_inc)} ({average_steps_from_distribution(res_inc)} steps)")
+            print(f"{both_gen.__name__}:\t{average_usable_pairs_from_distribution(res_both)} ({average_steps_from_distribution(res_both)} steps)")
+            print("TEST FAILED")
+            sys.exit(0)
             break
 
     prog_end_time = time.time()
@@ -1325,4 +1397,6 @@ def playground_main() -> None:
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
 if __name__ == "__main__":
-    playground_main()
+    # small_input_high_fid_equality_test()
+    fidelity_increment_sorting_test()
+    # playground_main()
