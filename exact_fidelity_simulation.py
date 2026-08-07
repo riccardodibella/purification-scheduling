@@ -487,12 +487,60 @@ def get_sorted_fid_generator(initial_fids: list[tuple[str, float]], model: Purif
             if working_string != "":
                 working_string += ","
             a: str = states_with_fid[2*how_many_to_take][0]
-            b: str = states_with_fid[2*how_many_to_take+1][0]                
+            b: str = states_with_fid[2*how_many_to_take+1][0]
             working_string += f"{a}:{b}"
                 
             to_return.append(working_string)
+        
+        # print(f"SFG {state_str} {to_return}")
         return to_return
     return sorted_fid_generator
+
+def get_sorted_increment_generator(initial_fids: list[tuple[str, float]], model: PurificationModel):
+    tuple_initial_fids: tuple[tuple[str, float], ...] = tuple(initial_fids)
+    def sorted_increment_generator(state_str: StateDescription) -> list[ChoiceDescription]:
+        input_states: list[str] = state_str.split(",")
+        if len(input_states) < 2:
+            return [""]
+        states_with_fid: list[tuple[str, float]] = [(key, get_key_fidelity_recursive_tuple_fids(key, tuple_initial_fids, model)) for key in input_states]
+
+        to_return: list[ChoiceDescription] = [""]
+        
+        working_string = ""
+        while len(states_with_fid) >= 2:
+            all_possible_single_pairs: list[tuple[int, int]] = list(combinations(range(len(states_with_fid)), 2))
+            chosen_pair: None | tuple[int, int] = None
+            best_increment: float = -math.inf
+            for pair in all_possible_single_pairs:
+                fid_a: float = states_with_fid[pair[0]][1]
+                fid_b: float = states_with_fid[pair[1]][1]
+                max_fid: float = max(fid_a, fid_b)
+                out_fid: float = purif_res_fidelity(model, fid_a, fid_b)
+                increment = out_fid - max_fid
+                if increment > best_increment:
+                    chosen_pair = pair
+                    best_increment = increment
+            assert chosen_pair is not None
+            assert best_increment >= 0
+
+            if working_string != "":
+                working_string += ","
+            
+            a: str = states_with_fid[chosen_pair[0]][0]
+            b: str = states_with_fid[chosen_pair[1]][0]
+            working_string += f"{a}:{b}"
+            to_return.append(working_string)
+
+            # check that the second index is higher, so if we remove it the first one is still valid for removal; 
+            # this should be true because of how we build all_possible_single_pairs
+            assert chosen_pair[1] > chosen_pair[0]
+            # https://stackoverflow.com/a/11303234
+            del states_with_fid[chosen_pair[1]]
+            del states_with_fid[chosen_pair[0]]
+        
+        # print(f"SIG {state_str} {to_return}")
+        return to_return
+    return sorted_increment_generator
 
 @lru_cache(maxsize=None)
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
@@ -1174,11 +1222,11 @@ def playground_main() -> None:
     model = PurificationModel.BIT_FLIP
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.5, threshold) for _ in range(7)], reverse=True)
+        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(25)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
-    actions_generators: list[ActionsGenerator] = [generate_all_possible_actions, generate_single_pair_actions, get_sorted_fid_generator(input_fid_list, model)]
+    actions_generators: list[ActionsGenerator] = [get_sorted_fid_generator(input_fid_list, model), get_sorted_increment_generator(input_fid_list, model)]
     for a_g in actions_generators:
         dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
         recursive_optimal_setup_main(dag)
