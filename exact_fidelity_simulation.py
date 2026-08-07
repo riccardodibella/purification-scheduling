@@ -538,10 +538,25 @@ def get_sorted_increment_generator(initial_fids: list[tuple[str, float]], model:
             # https://stackoverflow.com/a/11303234
             del states_with_fid[chosen_pair[1]]
             del states_with_fid[chosen_pair[0]]
-        
         # print(f"SIG {state_str} {to_return}")
         return to_return
     return sorted_increment_generator
+
+def remove_reduntant_actions(input: list[ChoiceDescription]) -> list[ChoiceDescription]:
+    the_set: set[frozenset[str]] = set()
+    for c in input:
+        the_set.add(frozenset(c.split(",")))
+    to_return: list[ChoiceDescription] = []
+    for fs in the_set:
+        choices: list[str] = sorted(list(fs))
+        working = ""
+        for k in choices:
+            if working != "":
+                working += ","
+            working += k
+        to_return.append(working)
+    to_return = sorted(to_return, key=lambda s: len(s))
+    return to_return
 
 def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], model: PurificationModel):
     tuple_initial_fids: tuple[tuple[str, float], ...] = tuple(initial_fids)
@@ -551,8 +566,6 @@ def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], mo
             return []
         if starting_string != "":
             starting_string += ","
-        if len(states_with_fid) == 2:
-            return [starting_string+f"{states_with_fid[0][0]}:{states_with_fid[1][0]}"]
                 
         fid_states_copy: list[tuple[str, float]] = states_with_fid.copy()
         inc_states_copy: list[tuple[str, float]] = states_with_fid.copy()
@@ -603,7 +616,9 @@ def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], mo
         to_return: list[ChoiceDescription] = [""]
         generated: list[ChoiceDescription] = _f(states_with_fid, "")
         to_return += generated
-        
+
+        to_return = remove_reduntant_actions(to_return)
+
         # print(f"SFI {state_str} {to_return}")
         return to_return
     return sorted_fid_increment_generator
@@ -1089,7 +1104,7 @@ class PurificationDAG:
 
 def within_equality_tolerance(a: float, b: float) -> bool:
     ulp_unit: float = math.ulp(max(abs(a), abs(b)))
-    return a - b <= ULP_UNITS_EQUALITY_TOLERANCE*ulp_unit
+    return abs(a - b) <= ULP_UNITS_EQUALITY_TOLERANCE*ulp_unit
 
 def recursive_optimal_setup_core(dag: PurificationDAG, node: DAGNode) -> tuple[float, float]: # (avg_usable, avg_steps)
     assert node.state_string in dag.nodes_dict
@@ -1288,11 +1303,15 @@ def playground_main() -> None:
     model = PurificationModel.WERNER
 
     def _input_generator() -> list[float]:
-        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(15)], reverse=True)
+        to_return = sorted([rng.uniform(0.6, threshold) for _ in range(16)], reverse=True)
         return to_return
     input_fid_list = gen_initial_named_pairs(_input_generator)
 
-    actions_generators: list[ActionsGenerator] = [get_sorted_fid_generator(input_fid_list, model), get_sorted_increment_generator(input_fid_list, model), get_sorted_fid_increment_generator(input_fid_list, model)]
+    actions_generators: list[ActionsGenerator] = [
+            get_sorted_fid_generator(input_fid_list, model), 
+            get_sorted_increment_generator(input_fid_list, model), 
+            get_sorted_fid_increment_generator(input_fid_list, model)
+        ]
     for a_g in actions_generators:
         dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
         recursive_optimal_setup_main(dag)

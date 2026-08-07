@@ -3,3 +3,4 @@ venv
 *.lprof
 **/typings/
 profile_output*.*
+canc.txt
