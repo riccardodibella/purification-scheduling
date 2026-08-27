@@ -9,6 +9,7 @@ import numpy as np
 from enum import Enum, auto
 import time
 from functools import lru_cache # pyright: ignore[reportUnusedImport]
+import matplotlib.pyplot as plt
 
 """
 # pyright: basic
@@ -1397,7 +1398,123 @@ def playground_main() -> None:
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
+def progressive_increase_main() -> None:
+    prog_start_time = time.time()
+    threshold = 0.9
+    model = PurificationModel.BIT_FLIP
+    NUM_SAMPLES = 1
+    MAX_PAIRS = 10
+
+    gen_names = [
+        "all_single_pair",
+        "sorted_fid",
+        "sorted_increment",
+        "sorted_fid_increment",
+    ]
+    num_pairs_range = list(range(2, MAX_PAIRS + 1))
+
+
+    results: list[                  # first index is generator index
+        list[                       # second index is index inside num_pairs_range
+            list[                   # third index is sample_i
+                tuple[float, float] # fourth index is 0 for "usable", 1 for "steps"
+                ]
+            ]
+        ] = [[] for _ in gen_names]
+    assert len(results) == len(gen_names)
+
+    for num_pairs_range_index, num_pairs in enumerate(num_pairs_range):
+        print(f"{num_pairs} PAIRS")
+        def _input_generator() -> list[float]:
+            to_return = sorted([rng.uniform(0.6, threshold) for _ in range(num_pairs)], reverse=True)
+            return to_return
+
+        for single_generator_results_list in results:
+            assert len(single_generator_results_list) == num_pairs_range_index
+            single_generator_results_list.append([])
+        
+        for sample_i in range(NUM_SAMPLES):
+            input_fid_list = gen_initial_named_pairs(_input_generator)
+            actions_generators: list[ActionsGenerator] = [
+                generate_single_pair_actions,
+                get_sorted_fid_generator(input_fid_list, model), 
+                get_sorted_increment_generator(input_fid_list, model), 
+                get_sorted_fid_increment_generator(input_fid_list, model)
+            ]
+            for gen_i in range(len(actions_generators)):
+                a_g = actions_generators[gen_i]
+                gen_name = gen_names[gen_i]
+                
+                dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
+                recursive_optimal_setup_main(dag)
+                policy = PurificationDAGPolicy(dag)
+                res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+                assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+                usable: float = average_usable_pairs_from_distribution(res)
+                steps: float = average_steps_from_distribution(res)
+
+                target_res_list = results[gen_i][num_pairs_range_index]
+                assert len(target_res_list) == sample_i
+                target_res_list.append((usable, steps))
+                assert len(results[gen_i][num_pairs_range_index]) == sample_i+1
+    
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
+
+    # --- Plotting ---
+    plt.figure()  # pyright: ignore[reportUnknownMemberType]
+
+    for gen_i, gen_name in enumerate(gen_names):
+
+        average_usable_list: list[float] = []
+        average_steps_list: list[float] = []
+        num_pairs_list: list[int] = [] # keep only the relevant elements from num_pairs_range
+        
+        single_generator_results_list = results[gen_i]
+        for num_pairs_range_index, samples in enumerate(single_generator_results_list):
+            if len(samples) > 0:
+                num_pairs = num_pairs_range[num_pairs_range_index]
+                samples_usable: list[float] = [t[0] for t in samples]
+                samples_steps: list[float] = [t[1] for t in samples]
+                assert len(samples_usable) > 0 and len(samples_steps) > 0
+                assert len(samples_usable) == len(samples_steps)
+
+                avg_usable = sum(samples_usable) / len(samples_usable)
+                avg_steps = sum(samples_steps) / len(samples_steps)
+
+                num_pairs_list.append(num_pairs)
+                average_usable_list.append(avg_usable)
+                average_steps_list.append(avg_steps)
+
+                assert len(average_usable_list) == len(average_steps_list) and len(average_usable_list) == len(num_pairs_list)
+
+        
+        # Connecting line
+        plt.plot(   # pyright: ignore[reportUnknownMemberType]
+            num_pairs_list,
+            average_usable_list,
+            label=gen_name,
+            linewidth=1,
+        )
+
+        # Individual markers with different sizes
+        plt.scatter(   # pyright: ignore[reportUnknownMemberType]
+            num_pairs_list,
+            average_usable_list,
+            s=[size*20 for size in average_steps_list],
+            label="_nolegend_"
+        )
+
+    plt.xlabel("Number of usable pairs")   # pyright: ignore[reportUnknownMemberType]
+    plt.ylabel("Average usable pairs")  # pyright: ignore[reportUnknownMemberType]
+    plt.title("Average usable pairs vs. number of input pairs")  # pyright: ignore[reportUnknownMemberType]
+    plt.legend()  # pyright: ignore[reportUnknownMemberType]
+    plt.grid(True)  # pyright: ignore[reportUnknownMemberType]
+    plt.show()  # pyright: ignore[reportUnknownMemberType]
+
+
 if __name__ == "__main__":
     # small_input_high_fid_equality_test()
     # fidelity_increment_sorting_test()
-    playground_main()
+    # playground_main()
+    progressive_increase_main()
