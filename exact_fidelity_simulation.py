@@ -1402,14 +1402,20 @@ def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
     model = PurificationModel.BIT_FLIP
-    NUM_SAMPLES = 1
-    MAX_PAIRS = 10
+    NUM_SAMPLES = 200
+    MAX_PAIRS = 16
 
-    gen_names = [
+    gen_names: list[str] = [
         "all_single_pair",
         "sorted_fid",
         "sorted_increment",
         "sorted_fid_increment",
+    ]
+    gen_max_test_pairs: list[int] = [
+        6,
+        MAX_PAIRS,
+        MAX_PAIRS,
+        11
     ]
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
@@ -1442,8 +1448,11 @@ def progressive_increase_main() -> None:
                 get_sorted_fid_increment_generator(input_fid_list, model)
             ]
             for gen_i in range(len(actions_generators)):
-                a_g = actions_generators[gen_i]
-                gen_name = gen_names[gen_i]
+                a_g: ActionsGenerator = actions_generators[gen_i]
+                gen_name: str = gen_names[gen_i]
+                gen_max_inputs: float = gen_max_test_pairs[gen_i]
+                if num_pairs > gen_max_inputs:
+                    continue
                 
                 dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
                 recursive_optimal_setup_main(dag)
@@ -1494,14 +1503,14 @@ def progressive_increase_main() -> None:
             num_pairs_list,
             average_usable_list,
             label=gen_name,
-            linewidth=1,
+            linewidth=0.5,
         )
 
         # Individual markers with different sizes
         plt.scatter(   # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
-            s=[size*20 for size in average_steps_list],
+            s=[(size*2)**2 for size in average_steps_list], # Area proportional to the number of steps
             label="_nolegend_"
         )
 
