@@ -1402,21 +1402,49 @@ def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
     model = PurificationModel.BIT_FLIP
-    NUM_SAMPLES = 200
-    MAX_PAIRS = 16
+    NUM_SAMPLES = 2000
+    MAX_PAIRS = 10
 
-    gen_names: list[str] = [
-        "all_single_pair",
-        "sorted_fid",
-        "sorted_increment",
-        "sorted_fid_increment",
+
+    det_policies: list[PolicyFunction] = [single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, bit_flip_highest_deltaF_single_choice_policy, all_pairs_policy_opposite]
+
+    class StratType(Enum):
+        DET=auto()
+        DAG=auto()
+
+    strat_names: list[str] = [
+        "DAG all_single_pair",
+        "DAG sorted_fid_increment",
+        "DAG sorted_fid",
+        "DAG sorted_increment",
+        "DET single pair highest fid",
+        "DET single pair lowest fid",
+        "DET single pair highest deltaF",
+        "DET all pairs opposite fid",
     ]
-    gen_max_test_pairs: list[int] = [
-        6,
+    strat_types: list[StratType] = [
+        StratType.DAG,
+        StratType.DAG,
+        StratType.DAG,
+        StratType.DAG,
+        StratType.DET,
+        StratType.DET,
+        StratType.DET,
+        StratType.DET,
+    ]
+    strat_max_test_pairs: list[int] = [
+        5,
+        10,
         MAX_PAIRS,
         MAX_PAIRS,
-        11
+        MAX_PAIRS,
+        MAX_PAIRS,
+        MAX_PAIRS,
+        MAX_PAIRS,
     ]
+
+    assert len(strat_names) == len(strat_types) and len(strat_names) == len(strat_max_test_pairs)
+
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
 
@@ -1426,8 +1454,8 @@ def progressive_increase_main() -> None:
                 tuple[float, float] # fourth index is 0 for "usable", 1 for "steps"
                 ]
             ]
-        ] = [[] for _ in gen_names]
-    assert len(results) == len(gen_names)
+        ] = [[] for _ in strat_names]
+    assert len(results) == len(strat_names)
 
     for num_pairs_range_index, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
@@ -1443,29 +1471,38 @@ def progressive_increase_main() -> None:
             input_fid_list = gen_initial_named_pairs(_input_generator)
             actions_generators: list[ActionsGenerator] = [
                 generate_single_pair_actions,
+                get_sorted_fid_increment_generator(input_fid_list, model),
                 get_sorted_fid_generator(input_fid_list, model), 
                 get_sorted_increment_generator(input_fid_list, model), 
-                get_sorted_fid_increment_generator(input_fid_list, model)
             ]
-            for gen_i in range(len(actions_generators)):
-                a_g: ActionsGenerator = actions_generators[gen_i]
-                gen_name: str = gen_names[gen_i]
-                gen_max_inputs: float = gen_max_test_pairs[gen_i]
-                if num_pairs > gen_max_inputs:
-                    continue
-                
-                dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
-                recursive_optimal_setup_main(dag)
-                policy = PurificationDAGPolicy(dag)
-                res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
-                assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
-                usable: float = average_usable_pairs_from_distribution(res)
-                steps: float = average_steps_from_distribution(res)
+            for strat_i in range(len(strat_names)):
+                strat_type: StratType = strat_types[strat_i]
+                if strat_type == StratType.DAG:
+                    a_g: ActionsGenerator = actions_generators[strat_i]
+                    strat_name: str = strat_names[strat_i]
+                    strat_max_inputs: float = strat_max_test_pairs[strat_i]
+                    if num_pairs > strat_max_inputs:
+                        continue
+                    
+                    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
+                    recursive_optimal_setup_main(dag)
+                    policy: PolicyFunction = PurificationDAGPolicy(dag)
+                    res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+                    assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+                    usable: float = average_usable_pairs_from_distribution(res)
+                    steps: float = average_steps_from_distribution(res)
+                elif strat_type == StratType.DET:
+                    policy: PolicyFunction = det_policies[strat_i - len(actions_generators)]
+                    res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+                    usable: float = average_usable_pairs_from_distribution(res)
+                    steps: float = average_steps_from_distribution(res)
+                else:
+                    exit(0)
 
-                target_res_list = results[gen_i][num_pairs_range_index]
+                target_res_list = results[strat_i][num_pairs_range_index]
                 assert len(target_res_list) == sample_i
                 target_res_list.append((usable, steps))
-                assert len(results[gen_i][num_pairs_range_index]) == sample_i+1
+                assert len(results[strat_i][num_pairs_range_index]) == sample_i+1
     
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
@@ -1473,13 +1510,13 @@ def progressive_increase_main() -> None:
     # --- Plotting ---
     plt.figure()  # pyright: ignore[reportUnknownMemberType]
 
-    for gen_i, gen_name in enumerate(gen_names):
+    for strat_i, strat_name in enumerate(strat_names):
 
         average_usable_list: list[float] = []
         average_steps_list: list[float] = []
         num_pairs_list: list[int] = [] # keep only the relevant elements from num_pairs_range
         
-        single_generator_results_list = results[gen_i]
+        single_generator_results_list = results[strat_i]
         for num_pairs_range_index, samples in enumerate(single_generator_results_list):
             if len(samples) > 0:
                 num_pairs = num_pairs_range[num_pairs_range_index]
@@ -1502,15 +1539,16 @@ def progressive_increase_main() -> None:
         plt.plot(   # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
-            label=gen_name,
-            linewidth=0.5,
+            label=strat_name,
+            linewidth=0.8,
+            linestyle = "solid" if strat_types[strat_i] == StratType.DAG else "dashed"
         )
 
         # Individual markers with different sizes
         plt.scatter(   # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
-            s=[(size*2)**2 for size in average_steps_list], # Area proportional to the number of steps
+            s=[(size)**2 for size in average_steps_list], # Area proportional to the number of steps
             label="_nolegend_"
         )
 
