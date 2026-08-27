@@ -34,7 +34,11 @@ BADPATCH_SAFETY_COEFF: int = 1000 # BADPATCH
 
 ULP_UNITS_EQUALITY_TOLERANCE = 5
 
-PolicyFunction = Callable[[list[tuple[str, float]], float], list[tuple[int, int]]]
+class PurificationModel(Enum):
+    BIT_FLIP = auto(),
+    WERNER = auto()
+
+PolicyFunction = Callable[[list[tuple[str, float]], float, PurificationModel], list[tuple[int, int]]]
 
 StateDescription = str
 ChoiceDescription = str
@@ -86,18 +90,19 @@ def decode_choice(l: list[tuple[str, float]], choice: ChoiceDescription) -> list
         to_return += [(index0, index1)]
     return to_return
 
-def lookup_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def lookup_policy(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     input_state: StateDescription = encode_state_description(l)
     if input_state not in lookup_dict.keys():
         # Unexpected state! (not in dict)
         print("lookup_policy state not found error")
         print(input_state)
         assert False
+        exit(0)
     choice_str: ChoiceDescription = lookup_dict[input_state]
     to_return = decode_choice(l, choice_str)
     return to_return
 
-def single_pair_greedy_policy_highest(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def single_pair_greedy_policy_highest(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
@@ -105,14 +110,14 @@ def single_pair_greedy_policy_highest(l: list[tuple[str, float]], thresh: float)
     return [(working_l[0][1],working_l[1][1])]
 
 
-def single_pair_greedy_policy_lowest(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def single_pair_greedy_policy_lowest(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0][1], reverse=False)
     return [(working_l[0][1],working_l[1][1])]
 
-def all_pairs_policy_opposite_middle_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def all_pairs_policy_opposite_middle_hole(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
@@ -124,7 +129,7 @@ def all_pairs_policy_opposite_middle_hole(l: list[tuple[str, float]], thresh: fl
         pairs += [(idx1, idx2)]
     return pairs
 
-def all_pairs_policy_opposite_tail_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def all_pairs_policy_opposite_tail_hole(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
@@ -140,7 +145,7 @@ def all_pairs_policy_opposite_tail_hole(l: list[tuple[str, float]], thresh: floa
         pairs += [(idx1, idx2)]
     return pairs
 
-def all_pairs_policy_opposite_head_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def all_pairs_policy_opposite_head_hole(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
@@ -206,10 +211,6 @@ def werner_channel_purif_res_fidelity(fid1: float, fid2: float) -> float:
     assert fid2 <= 1
     return  ( fid1 * fid2 + (1/9) * (1 - fid1) * (1 - fid2) ) / ( fid1 * fid2 + (1/3) * (fid1 + fid2 - 2 * fid1 * fid2) + (5/9) * (1 - fid1) * (1 - fid2) )
 
-class PurificationModel(Enum):
-    BIT_FLIP = auto(),
-    WERNER = auto()
-
 def purif_ok_prob(model: PurificationModel, fid1: float, fid2: float) -> float:
     if model == PurificationModel.BIT_FLIP:
         return bit_flip_channel_purif_ok_prob(fid1, fid2)
@@ -224,7 +225,7 @@ def purif_res_fidelity(model: PurificationModel, fid1: float, fid2: float) -> fl
         return werner_channel_purif_res_fidelity(fid1, fid2)
     raise NotImplementedError(f"Purification model {model} not supported (purify_ok_prob)")
 
-def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def bit_flip_highest_deltaF_single_choice_policy(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
@@ -659,13 +660,26 @@ def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], mo
 @lru_cache(maxsize=None)
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
+
+    # Check added to handle the case where initial_fids is not actually the set of initial pairs, but can contain combinations.
+    # This simplifies the code for the optimistic search policy, which can be treated as a pure policy without needing to inject initial_fids in it, as it can use the current states directly to do its calculations.
+    # If this loop becomes a bottleneck down the line we can modify that policy and remove this here. However, this may never be a problem, since the cache may catch the vast majority of the calls anyways.
+    for key2, fid in initial_fids:
+        if key == key2:
+            return fid
+
+    
     if key[0] != "<":
         # Base case: search it directly in the array and return its fidelity
         for key2, fid in initial_fids:
             if key == key2:
                 return fid
         # We didn't find the key... This is a problem.
+        print("Problemi! Problemi! Problemi per get_key_fidelity_recursive_tuple_fids")
+        print(f"key: |{key}|")
+        print(f"initial fids: {initial_fids}")
         assert False
+        exit(0)
     
     # Remove first "<" and last ">"
     assert len(key) >= 5 # at least <X+X>
@@ -819,6 +833,61 @@ def all_purification_sequence_trees(inputs: list[str]) -> list[Tree]:
                 for right_tree in right_trees:
                     results.append((left_tree, right_tree))
     return results
+
+
+def optimistic_search_policy(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True) # sorted in descending order
+
+    candidate_trees: list[Tree] = []
+
+    for number_of_pairs_considered in range(2, len(working_l) + 1):
+        # print(f"number_of_pairs_considered {number_of_pairs_considered}")
+        for working_l_chosen_elements in combinations(working_l, number_of_pairs_considered):
+            keys: list[str] = [elem[0][0] for elem in working_l_chosen_elements]
+            trees_that_use_all_keys: list[Tree] = all_purification_sequence_trees(keys)
+            for current_tree in trees_that_use_all_keys:
+                if is_tree_or_subtree_above_threshold(current_tree, l, threshold=thresh, model=model)[0]:
+                    candidate_trees.append(current_tree)
+            if len(candidate_trees) > 0:
+                break
+    if len(candidate_trees) > 0:
+        chosen_tree = candidate_trees[-1]
+        def extract_immediate_choices_from_tree(tree: Tree) -> list[tuple[str, str]]:
+            if type(tree) == str:
+                return []
+            assert type(tree) == tuple
+            to_return: list[tuple[str, str]] = []
+            left = tree[0]
+            right = tree[1]
+            if type(left) == str and type(right) == str:
+                to_return += [(left, right)]
+            to_return += extract_immediate_choices_from_tree(left)
+            to_return += extract_immediate_choices_from_tree(right)
+            return to_return
+        direct_choices: list[tuple[str, str]] = extract_immediate_choices_from_tree(chosen_tree)
+
+        to_return: list[tuple[int, int]] = []
+        for choice in direct_choices:
+            index_0: float = -1
+            index_1: float = -1
+
+            for working_l_element in working_l:
+                if choice[0] == working_l_element[0][0]:
+                    assert index_0 < 0
+                    index_0 = working_l_element[1]
+                if choice[1] == working_l_element[0][0]:
+                    assert index_1 < 0
+                    index_1 = working_l_element[1]
+            assert index_0 >= 0 and index_1 >= 0
+
+            to_return.append((index_0, index_1))
+
+        return to_return
+    return [] # It is impossible to arrive at a usable pair from here, so it is better to stop now
+
 
 def force_only_action_stop(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel, state_string: str):
     if not SMART_PRUNING:
@@ -1188,7 +1257,7 @@ class PurificationDAGPolicy:
     __name__ = "PurificationDAGPolicy"
     def __init__(self, dag: PurificationDAG) -> None:
         self.dag = dag
-    def __call__(self, l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    def __call__(self, l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
         input_state: StateDescription = encode_state_description(l)
         assert input_state in self.dag.nodes_dict.keys(), f"PurificationDAGPolicy state |{input_state}| not found"
         node: DAGNode = self.dag.nodes_dict[input_state]
@@ -1209,7 +1278,7 @@ def exact_recursive_simulation(policy: PolicyFunction, input_fidelities: list[tu
         return [(1, (0, previous_iterations, input_fidelities))]
     
     list_after_current_step: list[tuple[float, tuple[int, int, list[tuple[str, float]]]]] = []
-    choices = policy(input_fidelities, fidelity_threshold)
+    choices = policy(input_fidelities, fidelity_threshold, model)
     assert check_feasible_schedule(choices)
 
     if len(choices) == 0:
@@ -1435,20 +1504,21 @@ def progressive_increase_main() -> None:
     threshold = 0.9
     model = PurificationModel.BIT_FLIP
     NUM_SAMPLES = 100
-    MAX_PAIRS = 18
+    MAX_PAIRS = 14
 
 
-    det_policies: list[PolicyFunction] = [
+    direct_policies: list[PolicyFunction] = [
         single_pair_greedy_policy_highest, 
         # single_pair_greedy_policy_lowest, 
         bit_flip_highest_deltaF_single_choice_policy, 
         all_pairs_policy_opposite_middle_hole, 
         # all_pairs_policy_opposite_head_hole, 
-        all_pairs_policy_opposite_tail_hole
+        all_pairs_policy_opposite_tail_hole,
+        optimistic_search_policy,
     ]
 
     class StratType(Enum):
-        DET=auto()
+        DIRECT=auto()
         DAG=auto()
 
     strat_names: list[str] = [
@@ -1458,22 +1528,24 @@ def progressive_increase_main() -> None:
         "DAG sorted_increment",
         "DET single pair highest fid",
         # "DET single pair lowest fid",
-        "DET single pair highest deltaF",
-        "DET all pairs opposite fid (middle)",
+        "DIRECT single pair highest deltaF",
+        "DIRECT all pairs opposite fid (middle)",
         # "DET all pairs opposite fid (head)",
-        "DET all pairs opposite fid (tail)",
+        "DIRECT all pairs opposite fid (tail)",
+        "DIRECT optimistic search"
     ]
     strat_types: list[StratType] = [
         StratType.DAG,
         StratType.DAG,
         StratType.DAG,
         StratType.DAG,
-        StratType.DET,
-        # StratType.DET,
-        StratType.DET,
-        StratType.DET,
-        # StratType.DET,
-        StratType.DET,
+        StratType.DIRECT,
+        # StratType.DIRECT,
+        StratType.DIRECT,
+        StratType.DIRECT,
+        # StratType.DIRECT,
+        StratType.DIRECT,
+        StratType.DIRECT,
     ]
     strat_max_test_pairs: list[int] = [
         6,
@@ -1486,9 +1558,10 @@ def progressive_increase_main() -> None:
         MAX_PAIRS,
         # MAX_PAIRS,
         MAX_PAIRS,
+        8,
     ]
 
-    assert len(strat_names) == len(strat_types) and len(strat_names) == len(strat_max_test_pairs)
+    assert len(strat_names) == len(strat_types) and len(strat_names) == len(strat_max_test_pairs), f"{len(strat_names)} {len(strat_types)} {len(strat_max_test_pairs)}"
 
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
@@ -1521,13 +1594,13 @@ def progressive_increase_main() -> None:
                 get_sorted_increment_generator(input_fid_list, model), 
             ]
             for strat_i in range(len(strat_names)):
+                strat_max_inputs: float = strat_max_test_pairs[strat_i]
+                if num_pairs > strat_max_inputs:
+                    continue
                 strat_type: StratType = strat_types[strat_i]
                 if strat_type == StratType.DAG:
                     a_g: ActionsGenerator = actions_generators[strat_i]
                     strat_name: str = strat_names[strat_i]
-                    strat_max_inputs: float = strat_max_test_pairs[strat_i]
-                    if num_pairs > strat_max_inputs:
-                        continue
                     
                     dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
                     recursive_optimal_setup_main(dag)
@@ -1536,8 +1609,8 @@ def progressive_increase_main() -> None:
                     assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
                     usable: float = average_usable_pairs_from_distribution(res)
                     steps: float = average_steps_from_distribution(res)
-                elif strat_type == StratType.DET:
-                    policy: PolicyFunction = det_policies[strat_i - len(actions_generators)]
+                elif strat_type == StratType.DIRECT:
+                    policy: PolicyFunction = direct_policies[strat_i - len(actions_generators)]
                     res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
                     usable: float = average_usable_pairs_from_distribution(res)
                     steps: float = average_steps_from_distribution(res)
