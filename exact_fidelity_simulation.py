@@ -112,11 +112,43 @@ def single_pair_greedy_policy_lowest(l: list[tuple[str, float]], thresh: float) 
     working_l = sorted(working_l, key=lambda x: x[0][1], reverse=False)
     return [(working_l[0][1],working_l[1][1])]
 
-def all_pairs_policy_opposite(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+def all_pairs_policy_opposite_middle_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
     if(len(l) < 2):
         return []
     working_l = zip(l, list(range(len(l))))
     working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
+    pairs: list[tuple[int, int]] = []
+    for i in range(0, int(len(working_l)/2)):
+        idx1 = working_l[i][1]
+        idx2 = working_l[len(working_l)-1-i][1]
+        pairs += [(idx1, idx2)]
+    return pairs
+
+def all_pairs_policy_opposite_tail_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
+
+    if len(working_l) % 2 == 1:
+        working_l = working_l[:-1]
+    
+    pairs: list[tuple[int, int]] = []
+    for i in range(0, int(len(working_l)/2)):
+        idx1 = working_l[i][1]
+        idx2 = working_l[len(working_l)-1-i][1]
+        pairs += [(idx1, idx2)]
+    return pairs
+
+def all_pairs_policy_opposite_head_hole(l: list[tuple[str, float]], thresh: float) -> list[tuple[int, int]]:
+    if(len(l) < 2):
+        return []
+    working_l = zip(l, list(range(len(l))))
+    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True)
+
+    if len(working_l) % 2 == 1:
+        working_l = working_l[1:]
+    
     pairs: list[tuple[int, int]] = []
     for i in range(0, int(len(working_l)/2)):
         idx1 = working_l[i][1]
@@ -1402,11 +1434,18 @@ def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
     model = PurificationModel.BIT_FLIP
-    NUM_SAMPLES = 2000
-    MAX_PAIRS = 10
+    NUM_SAMPLES = 100
+    MAX_PAIRS = 18
 
 
-    det_policies: list[PolicyFunction] = [single_pair_greedy_policy_highest, single_pair_greedy_policy_lowest, bit_flip_highest_deltaF_single_choice_policy, all_pairs_policy_opposite]
+    det_policies: list[PolicyFunction] = [
+        single_pair_greedy_policy_highest, 
+        # single_pair_greedy_policy_lowest, 
+        bit_flip_highest_deltaF_single_choice_policy, 
+        all_pairs_policy_opposite_middle_hole, 
+        # all_pairs_policy_opposite_head_hole, 
+        all_pairs_policy_opposite_tail_hole
+    ]
 
     class StratType(Enum):
         DET=auto()
@@ -1418,9 +1457,11 @@ def progressive_increase_main() -> None:
         "DAG sorted_fid",
         "DAG sorted_increment",
         "DET single pair highest fid",
-        "DET single pair lowest fid",
+        # "DET single pair lowest fid",
         "DET single pair highest deltaF",
-        "DET all pairs opposite fid",
+        "DET all pairs opposite fid (middle)",
+        # "DET all pairs opposite fid (head)",
+        "DET all pairs opposite fid (tail)",
     ]
     strat_types: list[StratType] = [
         StratType.DAG,
@@ -1428,18 +1469,22 @@ def progressive_increase_main() -> None:
         StratType.DAG,
         StratType.DAG,
         StratType.DET,
+        # StratType.DET,
         StratType.DET,
         StratType.DET,
+        # StratType.DET,
         StratType.DET,
     ]
     strat_max_test_pairs: list[int] = [
-        5,
+        6,
         10,
+        14,
+        14,
+        MAX_PAIRS,
+        # MAX_PAIRS,
         MAX_PAIRS,
         MAX_PAIRS,
-        MAX_PAIRS,
-        MAX_PAIRS,
-        MAX_PAIRS,
+        # MAX_PAIRS,
         MAX_PAIRS,
     ]
 
