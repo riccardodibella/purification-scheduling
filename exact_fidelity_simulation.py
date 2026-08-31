@@ -871,7 +871,10 @@ def optimistic_search_policy(l: list[tuple[str, float]], thresh: float, model: P
             assert len(param_trees) > 0
             working_candidates: list[Tree] = param_trees.copy()
             # working_candidates = sorted(working_candidates, key=lambda t: len(extract_immediate_choices_from_tree(t)), reverse=True)
-            return working_candidates[-1]
+
+            working_candidates = list(reversed(working_candidates))
+            working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1], reverse=True)
+            return working_candidates[0]
         
         chosen_tree = choose_tree(l, candidate_trees)
         direct_choices: list[tuple[str, str]] = extract_immediate_choices_from_tree(chosen_tree)
