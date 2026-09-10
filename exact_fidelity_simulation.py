@@ -723,6 +723,7 @@ def state_is_reachable(state_string: StateDescription, initial_fids: list[tuple[
     return True
 
 
+cached_functions = [collapse_tree_to_string, all_trees, get_key_fidelity_recursive_tuple_fids]
 
 
 
@@ -1509,6 +1510,19 @@ def playground_main() -> None:
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
+class StrategyType(Enum):
+    DIRECT=auto()
+    DAG=auto()
+
+@dataclass
+class Strategy:
+    name: str
+    type: StrategyType
+    max_test_pairs: int
+    # exactly one of the two below is set, depending on `type`
+    policy: PolicyFunction | None = None
+    action_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None = None
+    
 def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
@@ -1517,73 +1531,32 @@ def progressive_increase_main() -> None:
     MAX_PAIRS = 7
 
 
-    direct_policies: list[PolicyFunction] = [
-        single_pair_greedy_policy_highest, 
-        # single_pair_greedy_policy_lowest, 
-        bit_flip_highest_deltaF_single_choice_policy, 
-        all_pairs_policy_opposite_middle_hole, 
-        # all_pairs_policy_opposite_head_hole, 
-        all_pairs_policy_opposite_tail_hole,
-        optimistic_search_policy,
+    strategies: list[Strategy] = [
+        Strategy("DAG all_single_pair", StrategyType.DAG, 7, action_generator_factory=lambda input_fid_list, model: generate_single_pair_actions),
+        Strategy("DAG sorted_fid_increment", StrategyType.DAG, 10, action_generator_factory=get_sorted_fid_increment_generator),
+        Strategy("DAG sorted_fid", StrategyType.DAG, 14, action_generator_factory=get_sorted_fid_generator),
+        Strategy("DAG sorted_increment", StrategyType.DAG, 14, action_generator_factory=get_sorted_increment_generator),
+        Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
+        Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
+        Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
+        Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
+        Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
+        Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
+        Strategy("DIRECT optimistic search", StrategyType.DIRECT, 8,
+                 policy=optimistic_search_policy),
     ]
-
-    class StratType(Enum):
-        DIRECT=auto()
-        DAG=auto()
-
-    strat_names: list[str] = [
-        "DAG all_single_pair",
-        "DAG sorted_fid_increment",
-        "DAG sorted_fid",
-        "DAG sorted_increment",
-        "DET single pair highest fid",
-        # "DET single pair lowest fid",
-        "DIRECT single pair highest deltaF",
-        "DIRECT all pairs opposite fid (middle)",
-        # "DET all pairs opposite fid (head)",
-        "DIRECT all pairs opposite fid (tail)",
-        "DIRECT optimistic search"
-    ]
-    strat_types: list[StratType] = [
-        StratType.DAG,
-        StratType.DAG,
-        StratType.DAG,
-        StratType.DAG,
-        StratType.DIRECT,
-        # StratType.DIRECT,
-        StratType.DIRECT,
-        StratType.DIRECT,
-        # StratType.DIRECT,
-        StratType.DIRECT,
-        StratType.DIRECT,
-    ]
-    strat_max_test_pairs: list[int] = [
-        7,
-        10,
-        14,
-        14,
-        MAX_PAIRS,
-        # MAX_PAIRS,
-        MAX_PAIRS,
-        MAX_PAIRS,
-        # MAX_PAIRS,
-        MAX_PAIRS,
-        8,
-    ]
-
-    assert len(strat_names) == len(strat_types) and len(strat_names) == len(strat_max_test_pairs), f"{len(strat_names)} {len(strat_types)} {len(strat_max_test_pairs)}"
 
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
 
-    results: list[                  # first index is generator index
+    results: list[                  # first index is strategy index
         list[                       # second index is index inside num_pairs_range
             list[                   # third index is sample_i
                 tuple[float, float] # fourth index is 0 for "usable", 1 for "steps"
                 ]
             ]
-        ] = [[] for _ in strat_names]
-    assert len(results) == len(strat_names)
+        ] = [[] for _ in strategies]
+    assert len(results) == len(strategies)
 
     for num_pairs_range_index, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
@@ -1597,21 +1570,17 @@ def progressive_increase_main() -> None:
         
         for sample_i in range(NUM_SAMPLES):
             input_fid_list = gen_initial_named_pairs(_input_generator)
-            actions_generators: list[ActionsGenerator] = [
-                generate_single_pair_actions,
-                get_sorted_fid_increment_generator(input_fid_list, model),
-                get_sorted_fid_generator(input_fid_list, model), 
-                get_sorted_increment_generator(input_fid_list, model), 
-            ]
-            for strat_i in range(len(strat_names)):
-                strat_max_inputs: float = strat_max_test_pairs[strat_i]
-                if num_pairs > strat_max_inputs:
+            for strat_i, strategy in enumerate(strategies):
+                if num_pairs > strategy.max_test_pairs:
                     continue
-                strat_type: StratType = strat_types[strat_i]
-                if strat_type == StratType.DAG:
-                    a_g: ActionsGenerator = actions_generators[strat_i]
-                    strat_name: str = strat_names[strat_i]
-                    
+
+                for f in cached_functions:
+                    f.cache_clear()
+                
+                if strategy.type == StrategyType.DAG:
+                    assert strategy.action_generator_factory is not None
+                    a_g: ActionsGenerator = strategy.action_generator_factory(input_fid_list, model)
+
                     dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
                     recursive_optimal_setup_main(dag)
                     policy: PolicyFunction = PurificationDAGPolicy(dag)
@@ -1619,9 +1588,9 @@ def progressive_increase_main() -> None:
                     assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
                     usable: float = average_usable_pairs_from_distribution(res)
                     steps: float = average_steps_from_distribution(res)
-                elif strat_type == StratType.DIRECT:
-                    policy: PolicyFunction = direct_policies[strat_i - len(actions_generators)]
-                    res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+                elif strategy.type == StrategyType.DIRECT:
+                    assert strategy.policy is not None
+                    res = exact_recursive_simulation(strategy.policy, input_fid_list, threshold, model)
                     usable: float = average_usable_pairs_from_distribution(res)
                     steps: float = average_steps_from_distribution(res)
                 else:
@@ -1638,11 +1607,11 @@ def progressive_increase_main() -> None:
     # --- Plotting ---
     plt.figure()  # pyright: ignore[reportUnknownMemberType]
 
-    for strat_i, strat_name in enumerate(strat_names):
+    for strat_i, strategy in enumerate(strategies):
 
         average_usable_list: list[float] = []
         average_steps_list: list[float] = []
-        num_pairs_list: list[int] = [] # keep only the relevant elements from num_pairs_range
+        num_pairs_list: list[int] = [] # keep only the relevstrategy.typeant elements from num_pairs_range
         
         single_generator_results_list = results[strat_i]
         for num_pairs_range_index, samples in enumerate(single_generator_results_list):
@@ -1667,9 +1636,9 @@ def progressive_increase_main() -> None:
         plt.plot(   # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
-            label=strat_name,
+            label=strategy.name,
             linewidth=0.8,
-            linestyle = "solid" if strat_types[strat_i] == StratType.DAG else "dashed"
+            linestyle = "solid" if strategy.type == StrategyType.DAG else "dashed"
         )
 
         # Individual markers with different sizes
