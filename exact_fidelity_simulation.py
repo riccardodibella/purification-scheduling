@@ -506,6 +506,26 @@ def generate_single_pair_actions(state_str: StateDescription) -> list[ChoiceDesc
         to_return.append(f"{input_states[index_a]}:{input_states[index_b]}")
     return to_return
 
+def generate_single_pair_actions_inertia(state_str: StateDescription) -> list[ChoiceDescription]:
+    if not "+" in state_str:
+        return generate_single_pair_actions(state_str)
+    
+    input_states: list[str] = state_str.split(",")
+    if len(input_states) < 2:
+        return [""]
+
+    merged_inputs: list[str] = [i_s for i_s in input_states if "+" in i_s]
+    assert len(merged_inputs) == 1
+
+    first_key: str = merged_inputs[0]
+
+    non_merged_inputs: list[str] = [i_s for i_s in input_states if i_s != first_key]
+
+    # This does not include the "stop now" action! If we already have purified something it is because some usable pair was achievable, so it doesn't make sense to stop now
+    to_return: list[ChoiceDescription] = [f"{first_key}:{n_m_i}" for n_m_i in non_merged_inputs]
+
+    return to_return
+
 def get_sorted_fid_generator(initial_fids: list[tuple[str, float]], model: PurificationModel):
     tuple_initial_fids: tuple[tuple[str, float], ...] = tuple(initial_fids)
     def sorted_fid_generator(state_str: StateDescription) -> list[ChoiceDescription]:
@@ -1553,13 +1573,14 @@ def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
     model = PurificationModel.WERNER
-    NUM_SAMPLES = 100
+    NUM_SAMPLES = 200
     MAX_PAIRS = 10
 
 
     strategies: list[Strategy] = [
-        Strategy("DAG all_single_pair", StrategyType.DAG, 6, action_generator_factory=lambda input_fid_list, model: generate_single_pair_actions),
-        Strategy("DAG sorted_fid_increment", StrategyType.DAG, 10, action_generator_factory=get_sorted_fid_increment_generator),
+        # Strategy("DAG all_single_pair", StrategyType.DAG, 6, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
+        Strategy("DAG single pair inertia", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
+        Strategy("DAG sorted_fid_increment", StrategyType.DAG, 7, action_generator_factory=get_sorted_fid_increment_generator),
         # Strategy("DAG sorted_fid", StrategyType.DAG, 14, action_generator_factory=get_sorted_fid_generator),
         # Strategy("DAG sorted_increment", StrategyType.DAG, 14, action_generator_factory=get_sorted_increment_generator),
         Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
