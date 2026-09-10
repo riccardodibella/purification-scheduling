@@ -835,69 +835,94 @@ def all_purification_sequence_trees(inputs: list[str]) -> list[Tree]:
                     results.append((left_tree, right_tree))
     return results
 
-
-def optimistic_search_policy(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
-    if(len(l) < 2):
+def extract_immediate_choices_from_tree(tree: Tree) -> list[tuple[str, str]]:
+    if type(tree) == str:
         return []
-    working_l = zip(l, list(range(len(l))))
-    working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True) # sorted in descending order
+    assert type(tree) == tuple
+    to_return: list[tuple[str, str]] = []
+    left = tree[0]
+    right = tree[1]
+    if type(left) == str and type(right) == str:
+        to_return += [(left, right)]
+    to_return += extract_immediate_choices_from_tree(left)
+    to_return += extract_immediate_choices_from_tree(right)
+    return to_return
+    
+ChooseTreeFunction = Callable[[list[tuple[str, float]], list[Tree], PurificationModel], Tree]
 
-    candidate_trees: list[Tree] = []
+def choose_tree_highest_fid(param_inputs: list[tuple[str, float]], param_trees: list[Tree], model: PurificationModel) -> Tree:
+    assert len(param_trees) > 0
+    working_candidates: list[Tree] = param_trees.copy()
+    working_candidates = list(reversed(working_candidates))
+    working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1], reverse=True)
+    return working_candidates[0]
 
-    for number_of_pairs_considered in range(2, len(working_l) + 1):
-        # print(f"number_of_pairs_considered {number_of_pairs_considered}")
-        for working_l_chosen_elements in combinations(working_l, number_of_pairs_considered):
-            keys: list[str] = [elem[0][0] for elem in working_l_chosen_elements]
-            trees_that_use_all_keys: list[Tree] = all_purification_sequence_trees(keys)
-            for current_tree in trees_that_use_all_keys:
-                if is_tree_or_subtree_above_threshold(current_tree, l, threshold=thresh, model=model)[0]:
-                    candidate_trees.append(current_tree)
-            if len(candidate_trees) > 0:
-                break
-    if len(candidate_trees) > 0:
-        def extract_immediate_choices_from_tree(tree: Tree) -> list[tuple[str, str]]:
-            if type(tree) == str:
-                return []
-            assert type(tree) == tuple
-            to_return: list[tuple[str, str]] = []
-            left = tree[0]
-            right = tree[1]
-            if type(left) == str and type(right) == str:
-                to_return += [(left, right)]
-            to_return += extract_immediate_choices_from_tree(left)
-            to_return += extract_immediate_choices_from_tree(right)
+def choose_tree_lowest_fid(param_inputs: list[tuple[str, float]], param_trees: list[Tree], model: PurificationModel) -> Tree:
+    assert len(param_trees) > 0
+    working_candidates: list[Tree] = param_trees.copy()
+    working_candidates = list(reversed(working_candidates))
+    working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1], reverse=True)
+    return working_candidates[-1]
+
+def choose_tree_most_choices_highest_fid(param_inputs: list[tuple[str, float]], param_trees: list[Tree], model: PurificationModel) -> Tree:
+    assert len(param_trees) > 0
+    working_candidates: list[Tree] = param_trees.copy()
+    working_candidates = list(reversed(working_candidates))
+    working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1], reverse=True)
+    working_candidates = sorted(working_candidates, key=lambda t: len(extract_immediate_choices_from_tree(t)), reverse=True)
+    return working_candidates[0]
+
+def choose_tree_most_choices_lowest_fid(param_inputs: list[tuple[str, float]], param_trees: list[Tree], model: PurificationModel) -> Tree:
+    assert len(param_trees) > 0
+    working_candidates: list[Tree] = param_trees.copy()
+    # working_candidates = list(reversed(working_candidates))
+    working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1])
+    working_candidates = sorted(working_candidates, key=lambda t: len(extract_immediate_choices_from_tree(t)), reverse=True)
+    return working_candidates[0]
+
+
+def get_optimistic_search_policy(choose_tree: ChooseTreeFunction) -> Callable[[list[tuple[str, float]], float, PurificationModel], list[tuple[int, int]]]:
+    def optimistic_search_policy(l: list[tuple[str, float]], thresh: float, model: PurificationModel) -> list[tuple[int, int]]:
+        if(len(l) < 2):
+            return []
+        working_l = zip(l, list(range(len(l))))
+        working_l = sorted(working_l, key=lambda x: x[0][1], reverse=True) # sorted in descending order
+
+        candidate_trees: list[Tree] = []
+
+        for number_of_pairs_considered in range(2, len(working_l) + 1):
+            # print(f"number_of_pairs_considered {number_of_pairs_considered}")
+            for working_l_chosen_elements in combinations(working_l, number_of_pairs_considered):
+                keys: list[str] = [elem[0][0] for elem in working_l_chosen_elements]
+                trees_that_use_all_keys: list[Tree] = all_purification_sequence_trees(keys)
+                for current_tree in trees_that_use_all_keys:
+                    if is_tree_or_subtree_above_threshold(current_tree, l, threshold=thresh, model=model)[0]:
+                        candidate_trees.append(current_tree)
+                if len(candidate_trees) > 0:
+                    break
+        if len(candidate_trees) > 0:
+            chosen_tree = choose_tree(l, candidate_trees, model)
+            direct_choices: list[tuple[str, str]] = extract_immediate_choices_from_tree(chosen_tree)
+
+            to_return: list[tuple[int, int]] = []
+            for choice in direct_choices:
+                index_0: float = -1
+                index_1: float = -1
+
+                for working_l_element in working_l:
+                    if choice[0] == working_l_element[0][0]:
+                        assert index_0 < 0
+                        index_0 = working_l_element[1]
+                    if choice[1] == working_l_element[0][0]:
+                        assert index_1 < 0
+                        index_1 = working_l_element[1]
+                assert index_0 >= 0 and index_1 >= 0
+
+                to_return.append((index_0, index_1))
+
             return to_return
-
-        def choose_tree(param_inputs: list[tuple[str, float]], param_trees: list[Tree]) -> Tree:
-            assert len(param_trees) > 0
-            working_candidates: list[Tree] = param_trees.copy()
-            # working_candidates = sorted(working_candidates, key=lambda t: len(extract_immediate_choices_from_tree(t)), reverse=True)
-
-            working_candidates = list(reversed(working_candidates))
-            working_candidates = sorted(working_candidates, key=lambda t: is_tree_or_subtree_above_threshold(tree=t, initial_fids=param_inputs, threshold=math.inf, model=model)[1], reverse=True)
-            return working_candidates[0]
-        
-        chosen_tree = choose_tree(l, candidate_trees)
-        direct_choices: list[tuple[str, str]] = extract_immediate_choices_from_tree(chosen_tree)
-
-        to_return: list[tuple[int, int]] = []
-        for choice in direct_choices:
-            index_0: float = -1
-            index_1: float = -1
-
-            for working_l_element in working_l:
-                if choice[0] == working_l_element[0][0]:
-                    assert index_0 < 0
-                    index_0 = working_l_element[1]
-                if choice[1] == working_l_element[0][0]:
-                    assert index_1 < 0
-                    index_1 = working_l_element[1]
-            assert index_0 >= 0 and index_1 >= 0
-
-            to_return.append((index_0, index_1))
-
-        return to_return
-    return [] # It is impossible to arrive at a usable pair from here, so it is better to stop now
+        return [] # It is impossible to arrive at a usable pair from here, so it is better to stop now
+    return optimistic_search_policy
 
 
 def force_only_action_stop(initial_fids: list[tuple[str, float]], threshold: float, model: PurificationModel, state_string: str):
@@ -1512,6 +1537,7 @@ def playground_main() -> None:
 
 class StrategyType(Enum):
     DIRECT=auto()
+    OPT_SEARCH=auto()
     DAG=auto()
 
 @dataclass
@@ -1526,24 +1552,26 @@ class Strategy:
 def progressive_increase_main() -> None:
     prog_start_time = time.time()
     threshold = 0.9
-    model = PurificationModel.BIT_FLIP
+    model = PurificationModel.WERNER
     NUM_SAMPLES = 100
-    MAX_PAIRS = 7
+    MAX_PAIRS = 10
 
 
     strategies: list[Strategy] = [
-        Strategy("DAG all_single_pair", StrategyType.DAG, 7, action_generator_factory=lambda input_fid_list, model: generate_single_pair_actions),
+        Strategy("DAG all_single_pair", StrategyType.DAG, 6, action_generator_factory=lambda input_fid_list, model: generate_single_pair_actions),
         Strategy("DAG sorted_fid_increment", StrategyType.DAG, 10, action_generator_factory=get_sorted_fid_increment_generator),
-        Strategy("DAG sorted_fid", StrategyType.DAG, 14, action_generator_factory=get_sorted_fid_generator),
-        Strategy("DAG sorted_increment", StrategyType.DAG, 14, action_generator_factory=get_sorted_increment_generator),
+        # Strategy("DAG sorted_fid", StrategyType.DAG, 14, action_generator_factory=get_sorted_fid_generator),
+        # Strategy("DAG sorted_increment", StrategyType.DAG, 14, action_generator_factory=get_sorted_increment_generator),
         Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-        Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-        Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-        Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-        Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
+        # Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
+        # Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
+        # Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
+        # Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
         Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-        Strategy("DIRECT optimistic search", StrategyType.DIRECT, 8,
-                 policy=optimistic_search_policy),
+        Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
+        Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
+        Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
+        Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
     ]
 
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
@@ -1588,7 +1616,7 @@ def progressive_increase_main() -> None:
                     assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
                     usable: float = average_usable_pairs_from_distribution(res)
                     steps: float = average_steps_from_distribution(res)
-                elif strategy.type == StrategyType.DIRECT:
+                elif strategy.type == StrategyType.DIRECT or strategy.type == StrategyType.OPT_SEARCH:
                     assert strategy.policy is not None
                     res = exact_recursive_simulation(strategy.policy, input_fid_list, threshold, model)
                     usable: float = average_usable_pairs_from_distribution(res)
@@ -1638,7 +1666,7 @@ def progressive_increase_main() -> None:
             average_usable_list,
             label=strategy.name,
             linewidth=0.8,
-            linestyle = "solid" if strategy.type == StrategyType.DAG else "dashed"
+            linestyle = "solid" if strategy.type == StrategyType.DAG else "dashed" if strategy.type == StrategyType.DIRECT else "dotted"
         )
 
         # Individual markers with different sizes
