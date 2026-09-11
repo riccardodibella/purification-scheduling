@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from itertools import chain, combinations, permutations, product
 import math
 from typing import Callable
+from matplotlib.backend_bases import Event, PickEvent
+from matplotlib.collections import PathCollection
+from matplotlib.lines import Line2D
 import numpy as np
 from enum import Enum, auto
 import time
@@ -1606,22 +1609,22 @@ def progressive_increase_main() -> None:
     threshold = 0.9
     model = PurificationModel.BIT_FLIP
     NUM_SAMPLES = 100
-    MAX_PAIRS = 12
+    MAX_PAIRS = 15
 
 
     strategies: list[Strategy] = [
-        # Strategy("DAG all_single_pair", StrategyType.DAG, 6, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
+        Strategy("DAG all_single_pair", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
         Strategy("DAG single pair inertia", StrategyType.DAG, 8, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
         Strategy("DAG highest fid single choice", StrategyType.DAG, 10, action_generator_factory=get_highest_fid_single_choice_generator),
         Strategy("DAG lowest fid single choice", StrategyType.DAG, 8, action_generator_factory=get_lowest_fid_single_choice_generator),
-        # Strategy("DAG sorted_fid_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_increment_generator),
-        # Strategy("DAG sorted_fid", StrategyType.DAG, 14, action_generator_factory=get_sorted_fid_generator),
-        # Strategy("DAG sorted_increment", StrategyType.DAG, 14, action_generator_factory=get_sorted_increment_generator),
+        Strategy("DAG sorted_fid_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_increment_generator),
+        Strategy("DAG sorted_fid", StrategyType.DAG, 15, action_generator_factory=get_sorted_fid_generator),
+        Strategy("DAG sorted_increment", StrategyType.DAG, 15, action_generator_factory=get_sorted_increment_generator),
         Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-        # Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-        # Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-        # Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-        # Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
+        Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
+        Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
+        Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
+        Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
         Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
         Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
         Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
@@ -1688,56 +1691,66 @@ def progressive_increase_main() -> None:
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
     # --- Plotting ---
-    plt.figure()  # pyright: ignore[reportUnknownMemberType]
+    fig, ax = plt.subplots() # pyright: ignore[reportUnknownMemberType]
+
+    line_map:dict[str, tuple[Line2D, PathCollection]] = {}  # legend line -> (line, scatter)
 
     for strat_i, strategy in enumerate(strategies):
-
         average_usable_list: list[float] = []
         average_steps_list: list[float] = []
-        num_pairs_list: list[int] = [] # keep only the relevstrategy.typeant elements from num_pairs_range
-        
+        num_pairs_list: list[int] = []
+
         single_generator_results_list = results[strat_i]
         for num_pairs_range_index, samples in enumerate(single_generator_results_list):
             if len(samples) > 0:
                 num_pairs = num_pairs_range[num_pairs_range_index]
-                samples_usable: list[float] = [t[0] for t in samples]
-                samples_steps: list[float] = [t[1] for t in samples]
-                assert len(samples_usable) > 0 and len(samples_steps) > 0
-                assert len(samples_usable) == len(samples_steps)
-
+                samples_usable = [t[0] for t in samples]
+                samples_steps = [t[1] for t in samples]
                 avg_usable = sum(samples_usable) / len(samples_usable)
                 avg_steps = sum(samples_steps) / len(samples_steps)
-
                 num_pairs_list.append(num_pairs)
                 average_usable_list.append(avg_usable)
                 average_steps_list.append(avg_steps)
 
-                assert len(average_usable_list) == len(average_steps_list) and len(average_usable_list) == len(num_pairs_list)
-
-        
-        # Connecting line
-        plt.plot(   # pyright: ignore[reportUnknownMemberType]
+        line, = ax.plot( # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
             label=strategy.name,
             linewidth=0.8,
-            linestyle = "solid" if strategy.type == StrategyType.DAG else "dashed" if strategy.type == StrategyType.DIRECT else "dotted"
+            linestyle="solid" if strategy.type == StrategyType.DAG else "dashed" if strategy.type == StrategyType.DIRECT else "dotted",
         )
-
-        # Individual markers with different sizes
-        plt.scatter(   # pyright: ignore[reportUnknownMemberType]
+        scatter = ax.scatter( # pyright: ignore[reportUnknownMemberType]
             num_pairs_list,
             average_usable_list,
-            s=[(size)**2 for size in average_steps_list], # Area proportional to the number of steps
-            label="_nolegend_"
+            s=[(size)**2 for size in average_steps_list],
+            label="_nolegend_",
         )
+        line_map[strategy.name] = (line, scatter)
 
-    plt.xlabel("Number of usable pairs")   # pyright: ignore[reportUnknownMemberType]
-    plt.ylabel("Average usable pairs")  # pyright: ignore[reportUnknownMemberType]
-    plt.title("Average usable pairs vs. number of input pairs")  # pyright: ignore[reportUnknownMemberType]
-    plt.legend()  # pyright: ignore[reportUnknownMemberType]
-    plt.grid(True)  # pyright: ignore[reportUnknownMemberType]
-    plt.show()  # pyright: ignore[reportUnknownMemberType]
+    ax.set_xlabel("Number of usable pairs") # pyright: ignore[reportUnknownMemberType]
+    ax.set_ylabel("Average usable pairs") # pyright: ignore[reportUnknownMemberType]
+    ax.set_title("Average usable pairs vs. number of input pairs") # pyright: ignore[reportUnknownMemberType]
+    ax.grid(True) # pyright: ignore[reportUnknownMemberType]
+    legend = ax.legend() # pyright: ignore[reportUnknownMemberType]
+
+    for legend_line in legend.get_lines():
+        legend_line.set_picker(True) # pyright: ignore[reportUnknownMemberType]
+        legend_line.set_pickradius(6)
+
+    def on_pick(event: Event) -> None:
+        pick_event: PickEvent = event # pyright: ignore[reportAssignmentType]
+        label = pick_event.artist.get_label()
+        if label not in line_map:
+            return
+        line, scatter = line_map[label] # pyright: ignore[reportArgumentType]
+        visible = not line.get_visible()
+        line.set_visible(visible)
+        scatter.set_visible(visible)
+        pick_event.artist.set_alpha(1.0 if visible else 0.2)
+        fig.canvas.draw() # pyright: ignore[reportUnknownMemberType]
+
+    fig.canvas.mpl_connect('pick_event', on_pick)
+    plt.show() # pyright: ignore[reportUnknownMemberType]
 
 
 if __name__ == "__main__":
