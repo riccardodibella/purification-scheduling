@@ -1,5 +1,6 @@
 # pyright: strict
 from __future__ import annotations
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from itertools import chain, combinations, product
@@ -1011,7 +1012,6 @@ class StrategyType(Enum):
 class Strategy:
     name: str
     type: StrategyType
-    max_test_pairs: int
     # exactly one of the two below is set, depending on `type`
     policy: PolicyFunction | None = None
     action_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None = None
@@ -1025,32 +1025,34 @@ MAX_FIDELITY = 0.925
 CONFIG_NAME = f"WERNER {MIN_FIDELITY} -> {THRESHOLD}"
 MODEL = PurificationModel.WERNER
 NUM_SAMPLES = 1000
-MAX_PAIRS = 15
+MAX_PAIRS = 50
+AVG_TIME_CUTOFF = 0.02
 
 STRATEGIES: list[Strategy] = [
-    Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-    Strategy("DAG all_single_pair", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
-    Strategy("DAG single pair inertia", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-    Strategy("DAG highest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_highest_fid_single_choice_generator),
-    Strategy("DAG lowest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_lowest_fid_single_choice_generator),
-    Strategy("DAG sorted_fid_increment", StrategyType.DAG, 6, action_generator_factory=get_sorted_fid_increment_generator),
-    Strategy("DAG sorted_fid", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_generator),
-    Strategy("DAG sorted_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_increment_generator),
-    Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-    Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-    Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-    Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-    Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
-    Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-    Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
-    Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
-    Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
-    Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
+    Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
+    Strategy("DAG all_single_pair", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
+    Strategy("DAG single pair inertia", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
+    Strategy("DAG highest fid single choice", StrategyType.DAG, action_generator_factory=get_highest_fid_single_choice_generator),
+    Strategy("DAG lowest fid single choice", StrategyType.DAG, action_generator_factory=get_lowest_fid_single_choice_generator),
+    Strategy("DAG sorted_fid_increment", StrategyType.DAG, action_generator_factory=get_sorted_fid_increment_generator),
+    Strategy("DAG sorted_fid", StrategyType.DAG, action_generator_factory=get_sorted_fid_generator),
+    Strategy("DAG sorted_increment", StrategyType.DAG, action_generator_factory=get_sorted_increment_generator),
+    Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, policy=single_pair_greedy_policy_highest),
+    Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, policy=single_pair_greedy_policy_lowest),
+    Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, policy=bit_flip_highest_deltaF_single_choice_policy),
+    Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, policy=all_pairs_policy_opposite_middle_hole),
+    Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, policy=all_pairs_policy_opposite_head_hole),
+    Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, policy=all_pairs_policy_opposite_tail_hole),
+    Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
+    Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
+    Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
+    Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
 ]
 
 
 
-def stateless_sim(sample_i: int, seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_index: int) -> tuple[int, int, float, float]: # (strat_i, sample_i, avg_usable, avg_steps)
+def stateless_sim(sample_i: int, seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_index: int) -> tuple[int, int, float, float, float]: # (strat_i, sample_i, avg_usable, avg_steps, time)
+    sim_start_time: float = time.time()
     strategy: Strategy =STRATEGIES[strategy_index]
     strategy_type: StrategyType = strategy.type
     strategy_policy: PolicyFunction | None = strategy.policy
@@ -1083,7 +1085,9 @@ def stateless_sim(sample_i: int, seed: int, num_pairs: int, min_fid: float, max_
         steps: float = average_steps_from_distribution(res)
     else:
         exit(0)
-    return (strategy_index, sample_i, usable, steps)
+    sim_stop_time: float = time.time()
+    sim_time_s: float = sim_stop_time - sim_start_time
+    return (strategy_index, sample_i, usable, steps, sim_time_s)
 
 def progressive_increase_main() -> None:
     prog_start_time = time.time()
@@ -1099,25 +1103,28 @@ def progressive_increase_main() -> None:
     # strategies/config lists from elsewhere in the file.
     rows: list[dict[str, str | int | float]] = []
 
+    active_strat_idxs: list[int] =list(range(len(STRATEGIES)))
+
     for _, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
 
         params_iterable: list[tuple[int, int, int, float, float, float, PurificationModel, int]] = []
 
         for sample_i in range(NUM_SAMPLES):
-            for strat_index, strategy in enumerate(STRATEGIES):
-                if num_pairs > strategy.max_test_pairs:
-                    continue
+            for strat_index in active_strat_idxs:
+                strategy = STRATEGIES[strat_index]
                 params_iterable.append((sample_i, num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index))
+        # np.random.default_rng(0).shuffle(params_iterable)
 
+        times_per_strat: dict[int, list[float]] = defaultdict(list)
 
         with ProcessPoolExecutor() as pool:
-            results = pool.map(stateless_sim, 
-                                *zip(*params_iterable),   # transposes tuples into 8 lists, one per argument
-                                chunksize=NUM_SAMPLES//20,
+            results = pool.map(stateless_sim,
+                                *zip(*params_iterable), # transposes single list of tuples into 8 lists, one per argument
+                                chunksize=NUM_SAMPLES//50,
                             )
             for result in results:
-                ret_strat_index, ret_sample_index, usable, steps = result
+                ret_strat_index, ret_sample_index, usable, steps, duration_s = result
                 strategy = STRATEGIES[ret_strat_index]
                 rows.append({
                     "config_name": CONFIG_NAME,
@@ -1131,7 +1138,21 @@ def progressive_increase_main() -> None:
                     "sample_i": ret_sample_index,
                     "usable": usable,
                     "steps": steps,
+                    "duration_s": duration_s,
                 })
+                times_per_strat[ret_strat_index].append(duration_s)
+
+        for k in times_per_strat.keys():
+            assert len(times_per_strat[k]) == NUM_SAMPLES
+            avg_time: float = sum(times_per_strat[k]) / len(times_per_strat[k])
+            if avg_time >= AVG_TIME_CUTOFF:
+                assert k in active_strat_idxs
+                active_strat_idxs.remove(k)
+                assert k not in active_strat_idxs
+                print(f"{STRATEGIES[k].name} killed (avg {avg_time} s)")
+        if len(active_strat_idxs) == 0:
+            print(f"AVG_TIME_CUTOFF ({AVG_TIME_CUTOFF} s) reached for all strategies")
+            break
 
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")

@@ -7,6 +7,7 @@ from matplotlib.backend_bases import Event, PickEvent
 from matplotlib.collections import PathCollection
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 
 def main() -> None:
@@ -75,6 +76,7 @@ def main() -> None:
         )
         line_map[strategy_name] = (line, scatter)
 
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xlabel("Number of usable pairs") # pyright: ignore[reportUnknownMemberType]
     ax.set_ylabel("Average usable pairs") # pyright: ignore[reportUnknownMemberType]
     ax.set_title(f"Average usable pairs vs. number of input pairs ({config_name})") # pyright: ignore[reportUnknownMemberType]
