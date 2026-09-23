@@ -675,6 +675,8 @@ def get_optimistic_search_policy(choose_tree: ChooseTreeFunction) -> Callable[[l
                         candidate_trees.append(current_tree)
                 if len(candidate_trees) > 0:
                     break
+            if len(candidate_trees) > 0:
+                break
         if len(candidate_trees) > 0:
             chosen_tree = choose_tree(l, candidate_trees, model)
             direct_choices: list[tuple[str, str]] = extract_immediate_choices_from_tree(chosen_tree)
@@ -1026,7 +1028,7 @@ MODEL = PurificationModel.WERNER
 CONFIG_NAME = f"{MODEL} [{MIN_FIDELITY}/{MAX_FIDELITY}] -> {THRESHOLD}"
 NUM_SAMPLES = 1000
 MAX_PAIRS = 50
-AVG_TIME_CUTOFF = 0.005
+AVG_TIME_CUTOFF = 0.1
 
 STRATEGIES: list[Strategy] = [
     Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
