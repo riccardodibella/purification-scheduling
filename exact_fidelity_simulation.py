@@ -10,25 +10,25 @@ from matplotlib.lines import Line2D
 import numpy as np
 from enum import Enum, auto
 import time
-from functools import lru_cache # pyright: ignore[reportUnusedImport]
+from functools import cache # pyright: ignore[reportUnusedImport]
 import matplotlib.pyplot as plt
+
 
 """
 # pyright: basic
 from line_profiler import profile # PYTHONHASHSEED=0 PYTHONOPTIMIZE=1 kernprof -l -v exact_fidelity_simulation.py
 """
 
+
 import os
 import sys
 
-sys.set_int_max_str_digits(1_000_000)
+# sys.set_int_max_str_digits(1_000_000)
 
 if os.environ.get("PYTHONHASHSEED") != "0":
     print("Restarting and setting hash seed")
     os.environ["PYTHONHASHSEED"] = "0"
     os.execv(sys.executable, [sys.executable] + sys.argv)
-
-rng = np.random.default_rng(0)
 
 
 ULP_UNITS_EQUALITY_TOLERANCE = 5
@@ -520,7 +520,7 @@ def get_sorted_fid_increment_generator(initial_fids: list[tuple[str, float]], mo
         return to_return
     return sorted_fid_increment_generator
 
-@lru_cache(maxsize=None)
+@cache
 def get_key_fidelity_recursive_tuple_fids(key: str, initial_fids: tuple[tuple[str, float], ...], model: PurificationModel) -> float:
     assert key != ""
 
@@ -1017,7 +1017,38 @@ class Strategy:
     # exactly one of the two below is set, depending on `type`
     policy: PolicyFunction | None = None
     action_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None = None
-    
+
+
+def stateless_sim(seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_type: StrategyType, strategy_policy: PolicyFunction | None, strategy_actions_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None) -> tuple[float, float]: # (avg_usable, avg_steps)
+    assert os.environ.get("PYTHONHASHSEED") == "0", "PYTHONHASHSEED is not set to 0"
+    rng = np.random.default_rng(seed)
+    def _input_generator() -> list[float]:
+        to_return = sorted([rng.uniform(min_fid, max_fid) for _ in range(num_pairs)], reverse=True)
+        return to_return
+    input_fid_list: list[tuple[str, float]] = gen_initial_named_pairs(_input_generator)
+    for f in cached_functions:
+        f.cache_clear()
+    if strategy_type == StrategyType.DAG:
+        # here, how do I check that "policy_or_actions_generator_factory" is not a Policy?
+        assert strategy_actions_generator_factory is not None
+        a_g: ActionsGenerator = strategy_actions_generator_factory(input_fid_list, model)
+
+        dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
+        recursive_optimal_setup_main(dag)
+        policy: PolicyFunction = PurificationDAGPolicy(dag)
+        res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
+        assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
+        usable: float = average_usable_pairs_from_distribution(res)
+        steps: float = average_steps_from_distribution(res)
+    elif strategy_type == StrategyType.DIRECT or strategy_type == StrategyType.OPT_SEARCH:
+        assert strategy_policy is not None
+        res = exact_recursive_simulation(strategy_policy, input_fid_list, threshold, model)
+        usable: float = average_usable_pairs_from_distribution(res)
+        steps: float = average_steps_from_distribution(res)
+    else:
+        exit(0)
+    return (usable, steps)
+
 def progressive_increase_main() -> None:
     prog_start_time = time.time()
 
@@ -1116,7 +1147,7 @@ def progressive_increase_main() -> None:
     min_fidelity = 0.8
     config_name = f"WERNER {min_fidelity} -> {threshold}"
     model = PurificationModel.WERNER
-    NUM_SAMPLES = 100
+    NUM_SAMPLES = 1000
     MAX_PAIRS = 15
 
     strategies: list[Strategy] = [
@@ -1159,46 +1190,20 @@ def progressive_increase_main() -> None:
 
     for num_pairs_range_index, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
-        def _input_generator() -> list[float]:
-            to_return = sorted([rng.uniform(min_fidelity, threshold) for _ in range(num_pairs)], reverse=True)
-            return to_return
-
         for single_generator_results_list in results:
             assert len(single_generator_results_list) == num_pairs_range_index
-            single_generator_results_list.append([])
+            single_generator_results_list.append([(-1.0, -1.0)]*NUM_SAMPLES)
         
         for sample_i in range(NUM_SAMPLES):
-            input_fid_list = gen_initial_named_pairs(_input_generator)
             for strat_i, strategy in enumerate(strategies):
                 if num_pairs > strategy.max_test_pairs:
                     continue
-
-                for f in cached_functions:
-                    f.cache_clear()
                 
-                if strategy.type == StrategyType.DAG:
-                    assert strategy.action_generator_factory is not None
-                    a_g: ActionsGenerator = strategy.action_generator_factory(input_fid_list, model)
-
-                    dag: PurificationDAG = PurificationDAG(input_fid_list, threshold, model, a_g)
-                    recursive_optimal_setup_main(dag)
-                    policy: PolicyFunction = PurificationDAGPolicy(dag)
-                    res = exact_recursive_simulation(policy, input_fid_list, threshold, model)
-                    assert np.allclose([average_usable_pairs_from_distribution(res), average_steps_from_distribution(res)], [dag.root.best_action_avg_usable,dag.root.best_action_avg_steps])
-                    usable: float = average_usable_pairs_from_distribution(res)
-                    steps: float = average_steps_from_distribution(res)
-                elif strategy.type == StrategyType.DIRECT or strategy.type == StrategyType.OPT_SEARCH:
-                    assert strategy.policy is not None
-                    res = exact_recursive_simulation(strategy.policy, input_fid_list, threshold, model)
-                    usable: float = average_usable_pairs_from_distribution(res)
-                    steps: float = average_steps_from_distribution(res)
-                else:
-                    exit(0)
+                usable, steps = stateless_sim(num_pairs * NUM_SAMPLES + sample_i, num_pairs, min_fidelity, threshold, threshold, model, strategy.type, strategy.policy, strategy.action_generator_factory)
 
                 target_res_list = results[strat_i][num_pairs_range_index]
-                assert len(target_res_list) == sample_i
-                target_res_list.append((usable, steps))
-                assert len(results[strat_i][num_pairs_range_index]) == sample_i+1
+                assert target_res_list[sample_i] == (-1.0, -1.0)
+                target_res_list[sample_i] = (usable, steps)
     
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
@@ -1218,6 +1223,8 @@ def progressive_increase_main() -> None:
             if len(samples) > 0:
                 num_pairs = num_pairs_range[num_pairs_range_index]
                 samples_usable = [t[0] for t in samples]
+                if min(samples_usable) < 0:
+                    continue
                 samples_steps = [t[1] for t in samples]
                 avg_usable = sum(samples_usable) / len(samples_usable)
                 avg_steps = sum(samples_steps) / len(samples_steps)
