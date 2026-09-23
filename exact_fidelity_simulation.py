@@ -1021,12 +1021,12 @@ class Strategy:
 
 THRESHOLD = 0.925
 MIN_FIDELITY = 0.8
-MAX_FIDELITY = 0.925
-CONFIG_NAME = f"WERNER {MIN_FIDELITY} -> {THRESHOLD}"
+MAX_FIDELITY = 0.92
 MODEL = PurificationModel.WERNER
+CONFIG_NAME = f"{MODEL} [{MIN_FIDELITY}/{MAX_FIDELITY}] -> {THRESHOLD}"
 NUM_SAMPLES = 1000
 MAX_PAIRS = 50
-AVG_TIME_CUTOFF = 0.02
+AVG_TIME_CUTOFF = 0.005
 
 STRATEGIES: list[Strategy] = [
     Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
@@ -1121,7 +1121,7 @@ def progressive_increase_main() -> None:
         with ProcessPoolExecutor() as pool:
             results = pool.map(stateless_sim,
                                 *zip(*params_iterable), # transposes single list of tuples into 8 lists, one per argument
-                                chunksize=NUM_SAMPLES//50,
+                                chunksize=NUM_SAMPLES//20 if num_pairs <= 6 else 1,
                             )
             for result in results:
                 ret_strat_index, ret_sample_index, usable, steps, duration_s = result
