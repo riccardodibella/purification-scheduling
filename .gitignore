@@ -1,6 +1,8 @@
 *_pycache_*
 venv
+pypy-venv
 *.lprof
 **/typings/
 profile_output*.*
 canc.txt
+*.json

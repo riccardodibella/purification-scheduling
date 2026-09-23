@@ -2,16 +2,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from itertools import chain, combinations, product
+import json
 import math
 from typing import Callable
-from matplotlib.backend_bases import Event, PickEvent
-from matplotlib.collections import PathCollection
-from matplotlib.lines import Line2D
 import numpy as np
 from enum import Enum, auto
 import time
 from functools import cache # pyright: ignore[reportUnusedImport]
-import matplotlib.pyplot as plt
 
 
 """
@@ -1178,99 +1175,46 @@ def progressive_increase_main() -> None:
 
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
+    # https://claude.ai/share/e2d0a015-2561-4806-a8a2-da039242a93b
+    # Flat/"tidy" list of rows: one row per (strategy, num_pairs, sample), each
+    # row carrying the full context it was produced under. There's a lot of
+    # repeated info across rows, but that keeps each row self-describing and
+    # easy to filter/group later (e.g. with pandas) without needing the
+    # strategies/config lists from elsewhere in the file.
+    rows: list[dict[str, str | int | float]] = []
 
-    results: list[                  # first index is strategy index
-        list[                       # second index is index inside num_pairs_range
-            list[                   # third index is sample_i
-                tuple[float, float] # fourth index is 0 for "usable", 1 for "steps"
-                ]
-            ]
-        ] = [[] for _ in strategies]
-    assert len(results) == len(strategies)
-
-    for num_pairs_range_index, num_pairs in enumerate(num_pairs_range):
+    for _, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
-        for single_generator_results_list in results:
-            assert len(single_generator_results_list) == num_pairs_range_index
-            single_generator_results_list.append([(-1.0, -1.0)]*NUM_SAMPLES)
-        
+
         for sample_i in range(NUM_SAMPLES):
-            for strat_i, strategy in enumerate(strategies):
+            for strategy in strategies:
                 if num_pairs > strategy.max_test_pairs:
                     continue
-                
+
                 usable, steps = stateless_sim(num_pairs * NUM_SAMPLES + sample_i, num_pairs, min_fidelity, threshold, threshold, model, strategy.type, strategy.policy, strategy.action_generator_factory)
 
-                target_res_list = results[strat_i][num_pairs_range_index]
-                assert target_res_list[sample_i] == (-1.0, -1.0)
-                target_res_list[sample_i] = (usable, steps)
-    
+                rows.append({
+                    "config_name": config_name,
+                    "model": model.name,
+                    "min_fidelity": min_fidelity,
+                    "max_fidelity": threshold,
+                    "threshold": threshold,
+                    "strategy_name": strategy.name,
+                    "strategy_type": strategy.type.name,
+                    "num_pairs": num_pairs,
+                    "sample_i": sample_i,
+                    "usable": usable,
+                    "steps": steps,
+                })
+
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
-    # --- Plotting ---
-    fig, ax = plt.subplots() # pyright: ignore[reportUnknownMemberType]
-
-    line_map:dict[str, tuple[Line2D, PathCollection]] = {}  # legend line -> (line, scatter)
-
-    for strat_i, strategy in enumerate(strategies):
-        average_usable_list: list[float] = []
-        average_steps_list: list[float] = []
-        num_pairs_list: list[int] = []
-
-        single_generator_results_list = results[strat_i]
-        for num_pairs_range_index, samples in enumerate(single_generator_results_list):
-            if len(samples) > 0:
-                num_pairs = num_pairs_range[num_pairs_range_index]
-                samples_usable = [t[0] for t in samples]
-                if min(samples_usable) < 0:
-                    continue
-                samples_steps = [t[1] for t in samples]
-                avg_usable = sum(samples_usable) / len(samples_usable)
-                avg_steps = sum(samples_steps) / len(samples_steps)
-                num_pairs_list.append(num_pairs)
-                average_usable_list.append(avg_usable)
-                average_steps_list.append(avg_steps)
-
-        line, = ax.plot( # pyright: ignore[reportUnknownMemberType]
-            num_pairs_list,
-            average_usable_list,
-            label=strategy.name,
-            linewidth=0.8,
-            linestyle="solid" if strategy.type == StrategyType.DAG else "dashed" if strategy.type == StrategyType.DIRECT else "dotted",
-        )
-        scatter = ax.scatter( # pyright: ignore[reportUnknownMemberType]
-            num_pairs_list,
-            average_usable_list,
-            s=[(size)**2 for size in average_steps_list],
-            label="_nolegend_",
-        )
-        line_map[strategy.name] = (line, scatter)
-
-    ax.set_xlabel("Number of usable pairs") # pyright: ignore[reportUnknownMemberType]
-    ax.set_ylabel("Average usable pairs") # pyright: ignore[reportUnknownMemberType]
-    ax.set_title(f"Average usable pairs vs. number of input pairs ({config_name})") # pyright: ignore[reportUnknownMemberType]
-    ax.grid(True) # pyright: ignore[reportUnknownMemberType]
-    legend = ax.legend() # pyright: ignore[reportUnknownMemberType]
-
-    for legend_line in legend.get_lines():
-        legend_line.set_picker(True) # pyright: ignore[reportUnknownMemberType]
-        legend_line.set_pickradius(6)
-
-    def on_pick(event: Event) -> None:
-        pick_event: PickEvent = event # pyright: ignore[reportAssignmentType]
-        label = pick_event.artist.get_label()
-        if label not in line_map:
-            return
-        line, scatter = line_map[label] # pyright: ignore[reportArgumentType]
-        visible = not line.get_visible()
-        line.set_visible(visible)
-        scatter.set_visible(visible)
-        pick_event.artist.set_alpha(1.0 if visible else 0.2)
-        fig.canvas.draw() # pyright: ignore[reportUnknownMemberType]
-
-    fig.canvas.mpl_connect('pick_event', on_pick)
-    plt.show() # pyright: ignore[reportUnknownMemberType]
+    # --- Save results to disk for the plotting script ---
+    out_path = "sim_results.json"
+    with open(out_path, "w") as f:
+        json.dump(rows, f)
+    print(f"Saved {len(rows)} rows to {out_path}")
 
 
 if __name__ == "__main__":
