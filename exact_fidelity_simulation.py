@@ -1,5 +1,6 @@
 # pyright: strict
 from __future__ import annotations
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from itertools import chain, combinations, product
 import json
@@ -1049,7 +1050,7 @@ STRATEGIES: list[Strategy] = [
 
 
 
-def stateless_sim(seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_index: int) -> tuple[float, float]: # (avg_usable, avg_steps)
+def stateless_sim(sample_i: int, seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_index: int) -> tuple[int, int, float, float]: # (strat_i, sample_i, avg_usable, avg_steps)
     strategy: Strategy =STRATEGIES[strategy_index]
     strategy_type: StrategyType = strategy.type
     strategy_policy: PolicyFunction | None = strategy.policy
@@ -1082,7 +1083,7 @@ def stateless_sim(seed: int, num_pairs: int, min_fid: float, max_fid: float, thr
         steps: float = average_steps_from_distribution(res)
     else:
         exit(0)
-    return (usable, steps)
+    return (strategy_index, sample_i, usable, steps)
 
 def progressive_increase_main() -> None:
     prog_start_time = time.time()
@@ -1101,13 +1102,23 @@ def progressive_increase_main() -> None:
     for _, num_pairs in enumerate(num_pairs_range):
         print(f"{num_pairs} PAIRS")
 
+        params_iterable: list[tuple[int, int, int, float, float, float, PurificationModel, int]] = []
+
         for sample_i in range(NUM_SAMPLES):
             for strat_index, strategy in enumerate(STRATEGIES):
                 if num_pairs > strategy.max_test_pairs:
                     continue
+                params_iterable.append((sample_i, num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index))
 
-                usable, steps = stateless_sim(num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index)
 
+        with ProcessPoolExecutor() as pool:
+            results = pool.map(stateless_sim, 
+                                *zip(*params_iterable),   # transposes tuples into 8 lists, one per argument
+                                chunksize=NUM_SAMPLES//20,
+                            )
+            for result in results:
+                ret_strat_index, ret_sample_index, usable, steps = result
+                strategy = STRATEGIES[ret_strat_index]
                 rows.append({
                     "config_name": CONFIG_NAME,
                     "model": MODEL.name,
@@ -1117,7 +1128,7 @@ def progressive_increase_main() -> None:
                     "strategy_name": strategy.name,
                     "strategy_type": strategy.type.name,
                     "num_pairs": num_pairs,
-                    "sample_i": sample_i,
+                    "sample_i": ret_sample_index,
                     "usable": usable,
                     "steps": steps,
                 })
