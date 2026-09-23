@@ -1016,7 +1016,45 @@ class Strategy:
     action_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None = None
 
 
-def stateless_sim(seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_type: StrategyType, strategy_policy: PolicyFunction | None, strategy_actions_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None) -> tuple[float, float]: # (avg_usable, avg_steps)
+
+
+THRESHOLD = 0.925
+MIN_FIDELITY = 0.8
+MAX_FIDELITY = 0.925
+CONFIG_NAME = f"WERNER {MIN_FIDELITY} -> {THRESHOLD}"
+MODEL = PurificationModel.WERNER
+NUM_SAMPLES = 1000
+MAX_PAIRS = 15
+
+STRATEGIES: list[Strategy] = [
+    Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
+    Strategy("DAG all_single_pair", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
+    Strategy("DAG single pair inertia", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
+    Strategy("DAG highest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_highest_fid_single_choice_generator),
+    Strategy("DAG lowest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_lowest_fid_single_choice_generator),
+    Strategy("DAG sorted_fid_increment", StrategyType.DAG, 6, action_generator_factory=get_sorted_fid_increment_generator),
+    Strategy("DAG sorted_fid", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_generator),
+    Strategy("DAG sorted_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_increment_generator),
+    Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
+    Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
+    Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
+    Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
+    Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
+    Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
+    Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
+    Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
+    Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
+    Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
+]
+
+
+
+def stateless_sim(seed: int, num_pairs: int, min_fid: float, max_fid: float, threshold: float, model: PurificationModel, strategy_index: int) -> tuple[float, float]: # (avg_usable, avg_steps)
+    strategy: Strategy =STRATEGIES[strategy_index]
+    strategy_type: StrategyType = strategy.type
+    strategy_policy: PolicyFunction | None = strategy.policy
+    strategy_actions_generator_factory: Callable[[list[tuple[str, float]], PurificationModel], ActionsGenerator] | None = strategy.action_generator_factory
+
     assert os.environ.get("PYTHONHASHSEED") == "0", "PYTHONHASHSEED is not set to 0"
     rng = np.random.default_rng(seed)
     def _input_generator() -> list[float]:
@@ -1050,129 +1088,6 @@ def progressive_increase_main() -> None:
     prog_start_time = time.time()
 
 
-
-    # threshold = 0.9
-    # min_fidelity = 0.6
-    # config_name = f"BIT_FLIP {min_fidelity} -> {threshold}"
-    # model = PurificationModel.BIT_FLIP
-    # NUM_SAMPLES = 100
-    # MAX_PAIRS = 15
-
-    # strategies: list[Strategy] = [
-    #     Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-    #     Strategy("DAG all_single_pair", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
-    #     Strategy("DAG single pair inertia", StrategyType.DAG, 8, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-    #     Strategy("DAG highest fid single choice", StrategyType.DAG, 10, action_generator_factory=get_highest_fid_single_choice_generator),
-    #     Strategy("DAG lowest fid single choice", StrategyType.DAG, 8, action_generator_factory=get_lowest_fid_single_choice_generator),
-    #     Strategy("DAG sorted_fid_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_increment_generator),
-    #     Strategy("DAG sorted_fid", StrategyType.DAG, 15, action_generator_factory=get_sorted_fid_generator),
-    #     Strategy("DAG sorted_increment", StrategyType.DAG, 15, action_generator_factory=get_sorted_increment_generator),
-    #     Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-    #     Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-    #     Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-    #     Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-    #     Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
-    #     Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-    #     Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
-    #     Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
-    #     Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
-    #     Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
-    # ]
-
-
-    # threshold = 0.99
-    # min_fidelity = 0.8
-    # config_name = f"BIT_FLIP {min_fidelity} -> {threshold}"
-    # model = PurificationModel.BIT_FLIP
-    # NUM_SAMPLES = 100
-    # MAX_PAIRS = 15
-
-    # strategies: list[Strategy] = [
-    #     Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-    #     Strategy("DAG all_single_pair", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
-    #     Strategy("DAG single pair inertia", StrategyType.DAG, 8, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-    #     Strategy("DAG highest fid single choice", StrategyType.DAG, 10, action_generator_factory=get_highest_fid_single_choice_generator),
-    #     Strategy("DAG lowest fid single choice", StrategyType.DAG, 8, action_generator_factory=get_lowest_fid_single_choice_generator),
-    #     Strategy("DAG sorted_fid_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_increment_generator),
-    #     Strategy("DAG sorted_fid", StrategyType.DAG, 15, action_generator_factory=get_sorted_fid_generator),
-    #     Strategy("DAG sorted_increment", StrategyType.DAG, 15, action_generator_factory=get_sorted_increment_generator),
-    #     Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-    #     Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-    #     Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-    #     Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-    #     Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
-    #     Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-    #     Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
-    #     Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
-    #     Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
-    #     Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
-    # ]
-    
-    
-
-
-    # threshold = 0.9
-    # min_fidelity = 0.6
-    # config_name = f"WERNER {min_fidelity} -> {threshold}"
-    # model = PurificationModel.WERNER
-    # NUM_SAMPLES = 100
-    # MAX_PAIRS = 15
-
-    # strategies: list[Strategy] = [
-    #     Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-    #     Strategy("DAG all_single_pair", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
-    #     Strategy("DAG single pair inertia", StrategyType.DAG, 6, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-    #     Strategy("DAG highest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_highest_fid_single_choice_generator),
-    #     Strategy("DAG lowest fid single choice", StrategyType.DAG, 6, action_generator_factory=get_lowest_fid_single_choice_generator),
-    #     Strategy("DAG sorted_fid_increment", StrategyType.DAG, 7, action_generator_factory=get_sorted_fid_increment_generator),
-    #     Strategy("DAG sorted_fid", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_generator),
-    #     Strategy("DAG sorted_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_increment_generator),
-    #     Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-    #     Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-    #     Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-    #     Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-    #     Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
-    #     Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-    #     Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
-    #     Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
-    #     Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
-    #     Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
-    # ]
-
-    
-    threshold = 0.925
-    min_fidelity = 0.8
-    config_name = f"WERNER {min_fidelity} -> {threshold}"
-    model = PurificationModel.WERNER
-    NUM_SAMPLES = 1000
-    MAX_PAIRS = 15
-
-    strategies: list[Strategy] = [
-        Strategy("DAG all_possible_actions", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-        Strategy("DAG all_single_pair", StrategyType.DAG, 5, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
-        Strategy("DAG single pair inertia", StrategyType.DAG, 7, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-        Strategy("DAG highest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_highest_fid_single_choice_generator),
-        Strategy("DAG lowest fid single choice", StrategyType.DAG, 7, action_generator_factory=get_lowest_fid_single_choice_generator),
-        Strategy("DAG sorted_fid_increment", StrategyType.DAG, 6, action_generator_factory=get_sorted_fid_increment_generator),
-        Strategy("DAG sorted_fid", StrategyType.DAG, 8, action_generator_factory=get_sorted_fid_generator),
-        Strategy("DAG sorted_increment", StrategyType.DAG, 8, action_generator_factory=get_sorted_increment_generator),
-        Strategy("DIRECT single pair highest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_highest),
-        Strategy("DIRECT single pair lowest fid", StrategyType.DIRECT, MAX_PAIRS, policy=single_pair_greedy_policy_lowest),
-        Strategy("DIRECT single pair highest deltaF", StrategyType.DIRECT, MAX_PAIRS, policy=bit_flip_highest_deltaF_single_choice_policy),
-        Strategy("DIRECT all pairs opposite fid (middle)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_middle_hole),
-        Strategy("DIRECT all pairs opposite fid (head)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_head_hole),
-        Strategy("DIRECT all pairs opposite fid (tail)", StrategyType.DIRECT, MAX_PAIRS, policy=all_pairs_policy_opposite_tail_hole),
-        Strategy("OPT_SEARCH highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_highest_fid)),
-        Strategy("OPT_SEARCH lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_lowest_fid)),
-        Strategy("OPT_SEARCH most choices highest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_highest_fid)),
-        Strategy("OPT_SEARCH most choices lowest fid", StrategyType.OPT_SEARCH, 6, policy=get_optimistic_search_policy(choose_tree_most_choices_lowest_fid)),
-    ]
-
-
-
-
-
-
     num_pairs_range = list(range(2, MAX_PAIRS + 1))
 
     # https://claude.ai/share/e2d0a015-2561-4806-a8a2-da039242a93b
@@ -1187,18 +1102,18 @@ def progressive_increase_main() -> None:
         print(f"{num_pairs} PAIRS")
 
         for sample_i in range(NUM_SAMPLES):
-            for strategy in strategies:
+            for strat_index, strategy in enumerate(STRATEGIES):
                 if num_pairs > strategy.max_test_pairs:
                     continue
 
-                usable, steps = stateless_sim(num_pairs * NUM_SAMPLES + sample_i, num_pairs, min_fidelity, threshold, threshold, model, strategy.type, strategy.policy, strategy.action_generator_factory)
+                usable, steps = stateless_sim(num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index)
 
                 rows.append({
-                    "config_name": config_name,
-                    "model": model.name,
-                    "min_fidelity": min_fidelity,
-                    "max_fidelity": threshold,
-                    "threshold": threshold,
+                    "config_name": CONFIG_NAME,
+                    "model": MODEL.name,
+                    "min_fidelity": MIN_FIDELITY,
+                    "max_fidelity": MAX_FIDELITY,
+                    "threshold": THRESHOLD,
                     "strategy_name": strategy.name,
                     "strategy_type": strategy.type.name,
                     "num_pairs": num_pairs,
