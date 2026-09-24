@@ -9,19 +9,10 @@ from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
+Row = dict[str, str | int | float]
 
-def main() -> None:
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "sim_results.json"
 
-    with open(in_path, "r") as f:
-        rows: list[dict[str, str | int | float]] = json.load(f)
-
-    if not rows:
-        print("No rows in data file; nothing to plot.")
-        return
-
-    config_name = str(rows[0]["config_name"])
-
+def plot_config(config_name: str, rows: list[Row]) -> None:
     # Rebuild strategy order (first-seen) and per-strategy type from the rows.
     strategy_order: list[str] = []
     strategy_types: dict[str, str] = {}
@@ -37,6 +28,7 @@ def main() -> None:
         grouped[(name, num_pairs)].append((float(row["usable"]), float(row["steps"])))
 
     fig, ax = plt.subplots() # pyright: ignore[reportUnknownMemberType]
+    fig.canvas.manager.set_window_title(config_name) # pyright: ignore[reportUnknownMemberType, reportOptionalMemberAccess]
 
     line_map: dict[str, tuple[Line2D, PathCollection]] = {}  # legend line -> (line, scatter)
 
@@ -77,9 +69,9 @@ def main() -> None:
         line_map[strategy_name] = (line, scatter)
 
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.set_xlabel("Number of usable pairs") # pyright: ignore[reportUnknownMemberType]
+    ax.set_xlabel("Number of input pairs") # pyright: ignore[reportUnknownMemberType]
     ax.set_ylabel("Average usable pairs") # pyright: ignore[reportUnknownMemberType]
-    ax.set_title(f"Average usable pairs vs. number of input pairs ({config_name})") # pyright: ignore[reportUnknownMemberType]
+    ax.set_title(config_name) # pyright: ignore[reportUnknownMemberType]
     ax.grid(True) # pyright: ignore[reportUnknownMemberType]
     legend = ax.legend() # pyright: ignore[reportUnknownMemberType]
 
@@ -100,6 +92,28 @@ def main() -> None:
         fig.canvas.draw() # pyright: ignore[reportUnknownMemberType]
 
     fig.canvas.mpl_connect('pick_event', on_pick)
+
+
+# https://claude.ai/share/631dc292-bbba-43fe-8459-f1d57b8972f3
+def main() -> None:
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "sim_results.json"
+
+    with open(in_path, "r") as f:
+        rows: list[Row] = json.load(f)
+
+    if not rows:
+        print("No rows in data file; nothing to plot.")
+        return
+
+    # Group rows by config name (dicts keep insertion order, so configs
+    # appear in the same order they were simulated).
+    rows_by_config: dict[str, list[Row]] = defaultdict(list)
+    for row in rows:
+        rows_by_config[str(row["config_name"])].append(row)
+
+    for config_name, config_rows in rows_by_config.items():
+        plot_config(config_name, config_rows)
+
     plt.show() # pyright: ignore[reportUnknownMemberType]
 
 

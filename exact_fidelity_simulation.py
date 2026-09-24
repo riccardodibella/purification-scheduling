@@ -1020,15 +1020,25 @@ class Strategy:
 
 
 
-
-THRESHOLD = 0.925
-MIN_FIDELITY = 0.8
-MAX_FIDELITY = 0.92
-MODEL = PurificationModel.WERNER
-CONFIG_NAME = f"{MODEL} [{MIN_FIDELITY}/{MAX_FIDELITY}] -> {THRESHOLD}"
 NUM_SAMPLES = 1000
 MAX_PAIRS = 50
-AVG_TIME_CUTOFF = 0.1
+AVG_TIME_CUTOFF = 0.01
+
+@dataclass
+class SimConfig():
+    model: PurificationModel
+    threshold: float
+    min_fidelity: float
+    max_fidelity: float
+
+def get_config_name(conf: SimConfig):
+    return f"{conf.model} [{conf.min_fidelity}/{conf.max_fidelity}] -> {conf.threshold}"
+
+CONFIGURATIONS: list[SimConfig] = [
+    SimConfig(model=PurificationModel.WERNER, threshold=0.925, min_fidelity=0.8, max_fidelity=0.92),
+    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.6, max_fidelity=0.8),
+]
+
 
 STRATEGIES: list[Strategy] = [
     Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
@@ -1105,56 +1115,65 @@ def progressive_increase_main() -> None:
     # strategies/config lists from elsewhere in the file.
     rows: list[dict[str, str | int | float]] = []
 
-    active_strat_idxs: list[int] =list(range(len(STRATEGIES)))
+    for config in CONFIGURATIONS:
+        MODEL: PurificationModel = config.model
+        MIN_FIDELITY: float = config.min_fidelity
+        MAX_FIDELITY: float = config.max_fidelity
+        THRESHOLD: float = config.threshold
+        CONFIG_NAME: str = get_config_name(config)
 
-    for _, num_pairs in enumerate(num_pairs_range):
-        print(f"{num_pairs} PAIRS")
+        print(f"Configuration \"{CONFIG_NAME}\"")
 
-        params_iterable: list[tuple[int, int, int, float, float, float, PurificationModel, int]] = []
+        active_strat_idxs: list[int] =list(range(len(STRATEGIES)))
 
-        for sample_i in range(NUM_SAMPLES):
-            for strat_index in active_strat_idxs:
-                strategy = STRATEGIES[strat_index]
-                params_iterable.append((sample_i, num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index))
-        # np.random.default_rng(0).shuffle(params_iterable)
+        for _, num_pairs in enumerate(num_pairs_range):
+            print(f"{num_pairs} PAIRS")
 
-        times_per_strat: dict[int, list[float]] = defaultdict(list)
+            params_iterable: list[tuple[int, int, int, float, float, float, PurificationModel, int]] = []
 
-        with ProcessPoolExecutor() as pool:
-            results = pool.map(stateless_sim,
-                                *zip(*params_iterable), # transposes single list of tuples into 8 lists, one per argument
-                                chunksize=NUM_SAMPLES//20 if num_pairs <= 6 else 1,
-                            )
-            for result in results:
-                ret_strat_index, ret_sample_index, usable, steps, duration_s = result
-                strategy = STRATEGIES[ret_strat_index]
-                rows.append({
-                    "config_name": CONFIG_NAME,
-                    "model": MODEL.name,
-                    "min_fidelity": MIN_FIDELITY,
-                    "max_fidelity": MAX_FIDELITY,
-                    "threshold": THRESHOLD,
-                    "strategy_name": strategy.name,
-                    "strategy_type": strategy.type.name,
-                    "num_pairs": num_pairs,
-                    "sample_i": ret_sample_index,
-                    "usable": usable,
-                    "steps": steps,
-                    "duration_s": duration_s,
-                })
-                times_per_strat[ret_strat_index].append(duration_s)
+            for sample_i in range(NUM_SAMPLES):
+                for strat_index in active_strat_idxs:
+                    strategy = STRATEGIES[strat_index]
+                    params_iterable.append((sample_i, num_pairs * NUM_SAMPLES + sample_i, num_pairs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index))
+            # np.random.default_rng(0).shuffle(params_iterable)
 
-        for k in times_per_strat.keys():
-            assert len(times_per_strat[k]) == NUM_SAMPLES
-            avg_time: float = sum(times_per_strat[k]) / len(times_per_strat[k])
-            if avg_time >= AVG_TIME_CUTOFF:
-                assert k in active_strat_idxs
-                active_strat_idxs.remove(k)
-                assert k not in active_strat_idxs
-                print(f"{STRATEGIES[k].name} killed (avg {avg_time} s)")
-        if len(active_strat_idxs) == 0:
-            print(f"AVG_TIME_CUTOFF ({AVG_TIME_CUTOFF} s) reached for all strategies")
-            break
+            times_per_strat: dict[int, list[float]] = defaultdict(list)
+
+            with ProcessPoolExecutor() as pool:
+                results = pool.map(stateless_sim,
+                                    *zip(*params_iterable), # transposes single list of tuples into 8 lists, one per argument
+                                    chunksize=NUM_SAMPLES//20 if num_pairs <= 6 else 1,
+                                )
+                for result in results:
+                    ret_strat_index, ret_sample_index, usable, steps, duration_s = result
+                    strategy = STRATEGIES[ret_strat_index]
+                    rows.append({
+                        "config_name": CONFIG_NAME,
+                        "model": MODEL.name,
+                        "min_fidelity": MIN_FIDELITY,
+                        "max_fidelity": MAX_FIDELITY,
+                        "threshold": THRESHOLD,
+                        "strategy_name": strategy.name,
+                        "strategy_type": strategy.type.name,
+                        "num_pairs": num_pairs,
+                        "sample_i": ret_sample_index,
+                        "usable": usable,
+                        "steps": steps,
+                        "duration_s": duration_s,
+                    })
+                    times_per_strat[ret_strat_index].append(duration_s)
+
+            for k in times_per_strat.keys():
+                assert len(times_per_strat[k]) == NUM_SAMPLES
+                avg_time: float = sum(times_per_strat[k]) / len(times_per_strat[k])
+                if avg_time >= AVG_TIME_CUTOFF:
+                    assert k in active_strat_idxs
+                    active_strat_idxs.remove(k)
+                    assert k not in active_strat_idxs
+                    print(f"{STRATEGIES[k].name} killed (avg {avg_time} s)")
+            if len(active_strat_idxs) == 0:
+                print(f"AVG_TIME_CUTOFF ({AVG_TIME_CUTOFF} s) reached for all strategies")
+                break
 
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
