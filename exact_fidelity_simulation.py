@@ -1020,7 +1020,7 @@ class Strategy:
 
 
 
-NUM_SAMPLES = 1000
+NUM_SAMPLES = 200
 MAX_PAIRS = 50
 AVG_TIME_CUTOFF = 0.01
 
@@ -1035,8 +1035,9 @@ def get_config_name(conf: SimConfig):
     return f"{conf.model} [{conf.min_fidelity}/{conf.max_fidelity}] -> {conf.threshold}"
 
 CONFIGURATIONS: list[SimConfig] = [
-    SimConfig(model=PurificationModel.WERNER, threshold=0.925, min_fidelity=0.8, max_fidelity=0.92),
-    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.6, max_fidelity=0.8),
+    # SimConfig(model=PurificationModel.WERNER, threshold=0.925, min_fidelity=0.8, max_fidelity=0.92),
+    # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.6, max_fidelity=0.8),
+    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.9, min_fidelity=0.5, max_fidelity=0.9),
 ]
 
 
