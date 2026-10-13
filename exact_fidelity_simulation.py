@@ -1190,6 +1190,8 @@ def progressive_increase_main() -> None:
 def target_average_main() -> None:
     prog_start_time = time.time()
 
+    rows: list[dict[str, str | int | float]] = []
+
     TARGET_USABLE: int = 1
     NUM_SEEDS_TARGET_SIM: int = 100
 
@@ -1207,23 +1209,37 @@ def target_average_main() -> None:
             if strategy.name in ["DAG all_possible_actions"]:
                 continue
             print(f"{strategy.name}")
-            sum_num_inputs: int = 0
+            list_num_inputs: list[int] = [1000]*NUM_SEEDS_TARGET_SIM
             for seed in range(NUM_SEEDS_TARGET_SIM):
                 num_inputs: int = 2
                 while True:
-                    # print(f"{num_inputs}")
                     _, _, avg_usable, _, _ = stateless_sim(seed, seed, num_inputs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index)
                     if avg_usable > TARGET_USABLE:
-                        sum_num_inputs += num_inputs
+                        list_num_inputs[seed] = num_inputs
                         break
-                    # print(f"{num_inputs} -> {avg_usable}")
                     num_inputs += 1
-            avg_num_inputs = float(sum_num_inputs) / float(NUM_SEEDS_TARGET_SIM)
+            avg_num_inputs = float(sum(list_num_inputs)) / float(len(list_num_inputs))
             print(f"{strategy.name} {avg_num_inputs}")
+
+            rows.append({
+                "config_name": CONFIG_NAME,
+                "model": MODEL.name,
+                "min_fidelity": MIN_FIDELITY,
+                "max_fidelity": MAX_FIDELITY,
+                "threshold": THRESHOLD,
+                "strategy_name": strategy.name,
+                "strategy_type": strategy.type.name,
+                "avg_num_inputs": avg_num_inputs,
+            })
 
 
     prog_end_time = time.time()
     print(f"Total execution time: {prog_end_time - prog_start_time} s")
+
+    out_path = "target_sim.json"
+    with open(out_path, "w") as f:
+        json.dump(rows, f)
+    print(f"Saved {len(rows)} rows to {out_path}")
 
 if __name__ == "__main__":
     # progressive_increase_main()
