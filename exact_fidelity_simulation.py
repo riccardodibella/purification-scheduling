@@ -1037,7 +1037,9 @@ def get_config_name(conf: SimConfig):
 CONFIGURATIONS: list[SimConfig] = [
     # SimConfig(model=PurificationModel.WERNER, threshold=0.925, min_fidelity=0.8, max_fidelity=0.92),
     # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.6, max_fidelity=0.8),
-    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.9, min_fidelity=0.5, max_fidelity=0.9),
+    # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.9, min_fidelity=0.5, max_fidelity=0.9),
+
+    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.7, max_fidelity=0.8),
 ]
 
 
@@ -1185,6 +1187,44 @@ def progressive_increase_main() -> None:
         json.dump(rows, f)
     print(f"Saved {len(rows)} rows to {out_path}")
 
+def target_average_main() -> None:
+    prog_start_time = time.time()
+
+    TARGET_USABLE: int = 1
+    NUM_SEEDS_TARGET_SIM: int = 100
+
+
+    for config in CONFIGURATIONS:
+        MODEL: PurificationModel = config.model
+        MIN_FIDELITY: float = config.min_fidelity
+        MAX_FIDELITY: float = config.max_fidelity
+        THRESHOLD: float = config.threshold
+        CONFIG_NAME: str = get_config_name(config)
+
+        print(f"Configuration \"{CONFIG_NAME}\"")
+
+        for strat_index, strategy in enumerate(STRATEGIES):
+            if strategy.name in ["DAG all_possible_actions"]:
+                continue
+            print(f"{strategy.name}")
+            sum_num_inputs: int = 0
+            for seed in range(NUM_SEEDS_TARGET_SIM):
+                num_inputs: int = 2
+                while True:
+                    # print(f"{num_inputs}")
+                    _, _, avg_usable, _, _ = stateless_sim(seed, seed, num_inputs, MIN_FIDELITY, MAX_FIDELITY, THRESHOLD, MODEL, strat_index)
+                    if avg_usable > TARGET_USABLE:
+                        sum_num_inputs += num_inputs
+                        break
+                    # print(f"{num_inputs} -> {avg_usable}")
+                    num_inputs += 1
+            avg_num_inputs = float(sum_num_inputs) / float(NUM_SEEDS_TARGET_SIM)
+            print(f"{strategy.name} {avg_num_inputs}")
+
+
+    prog_end_time = time.time()
+    print(f"Total execution time: {prog_end_time - prog_start_time} s")
 
 if __name__ == "__main__":
-    progressive_increase_main()
+    # progressive_increase_main()
+    target_average_main()
