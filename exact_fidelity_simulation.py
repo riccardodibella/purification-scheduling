@@ -1039,16 +1039,17 @@ CONFIGURATIONS: list[SimConfig] = [
     # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.6, max_fidelity=0.8),
     # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.9, min_fidelity=0.5, max_fidelity=0.9),
 
-    SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.7, max_fidelity=0.8),
+    # SimConfig(model=PurificationModel.BIT_FLIP, threshold=0.95, min_fidelity=0.7, max_fidelity=0.8),
+    SimConfig(model=PurificationModel.WERNER, threshold=0.9, min_fidelity=0.76, max_fidelity=0.9),
 ]
 
 
 STRATEGIES: list[Strategy] = [
-    Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
-    Strategy("DAG all_single_pair", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
+    # Strategy("DAG all_possible_actions", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_all_possible_actions),
+    # Strategy("DAG all_single_pair", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions),
     Strategy("DAG single pair inertia", StrategyType.DAG, action_generator_factory=lambda ignored1, ignored2: generate_single_pair_actions_inertia),
-    Strategy("DAG highest fid single choice", StrategyType.DAG, action_generator_factory=get_highest_fid_single_choice_generator),
-    Strategy("DAG lowest fid single choice", StrategyType.DAG, action_generator_factory=get_lowest_fid_single_choice_generator),
+    # Strategy("DAG highest fid single choice", StrategyType.DAG, action_generator_factory=get_highest_fid_single_choice_generator),
+    # Strategy("DAG lowest fid single choice", StrategyType.DAG, action_generator_factory=get_lowest_fid_single_choice_generator),
     Strategy("DAG sorted_fid_increment", StrategyType.DAG, action_generator_factory=get_sorted_fid_increment_generator),
     Strategy("DAG sorted_fid", StrategyType.DAG, action_generator_factory=get_sorted_fid_generator),
     Strategy("DAG sorted_increment", StrategyType.DAG, action_generator_factory=get_sorted_increment_generator),
@@ -1193,7 +1194,7 @@ def target_average_main() -> None:
     rows: list[dict[str, str | int | float]] = []
 
     TARGET_USABLE: int = 1
-    NUM_SEEDS_TARGET_SIM: int = 100
+    NUM_SEEDS_TARGET_SIM: int = 20
 
 
     for config in CONFIGURATIONS:
